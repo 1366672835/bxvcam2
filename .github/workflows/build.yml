@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14
     timeout-minutes: 300        # 双架构全组件冷编译 40~70 分钟，留足余量
 
     steps:
