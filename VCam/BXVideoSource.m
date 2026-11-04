@@ -130,7 +130,6 @@ static void *kBXPoolKey = &kBXPoolKey;
 }
 
 - (BOOL)loadURL:(NSURL *)url error:(NSError **)error {
-    if (!url.isFileURL || ![[NSFileManager defaultManager] fileExistsAtPath:url.path]) { if (error) *error = [NSError errorWithDomain:@"BXVideo" code:-2 userInfo:@{NSLocalizedDescriptionKey:@"文件不存在或路径无效"}]; return NO; }
     if (!url) return NO;
     [self unload];
 
@@ -152,9 +151,7 @@ static void *kBXPoolKey = &kBXPoolKey;
 
     // 直接按摄像头格式解码（420f/420v）：AVAssetReader 走硬解就能直接出 NV12，
     // 省掉「BGRA 解码 → CIContext 转 420f」那一次全画幅转换。
-      // AVAssetReaderTrackOutput 在某些文件上会直接抛 NSException（轨不属于该 reader /
-      // outputSettings 不支持 / iCloud 占位文件）。Aweme-2026-11-05 05:25 的 SIGABRT 就是它。
-      AVAssetReaderTrackOutput *out = nil;
+    AVAssetReaderTrackOutput *out = nil;
       @try {
           out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track
                                                           outputSettings:[self _readerSettings]];
@@ -170,6 +167,8 @@ static void *kBXPoolKey = &kBXPoolKey;
                                               userInfo:@{NSLocalizedDescriptionKey: @"无法建立视频输出"}];
           return NO;
       }
+      out.alwaysCopiesSampleData = NO;
+    if (![reader canAddOutput:out]) {
         if (error) *error = [NSError errorWithDomain:@"BXVideoSource" code:2
                                             userInfo:@{NSLocalizedDescriptionKey: @"无法添加输出"}];
         return NO;
