@@ -314,6 +314,11 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
 // 否则 stop() 的 dispatch_sync 无法等它，会释放正在握手的 _fmt ——
 // Aweme-2026-11-05 04:37 的 ff_rtsp_connect 空指针崩溃就是这么来的。
 - (BOOL)startWithURLString:(NSString *)urlString error:(NSError **)error {
+    // decodeLoop 会长期占用 _decodeQueue；此时直接 dispatch_sync 会永久阻塞（界面卡死）。
+    // 已经在跑就先停——stop 自己会等队列排空。
+    if (self.isRunning) {
+        [self stop];
+    }
     __block BOOL ok = NO;
     __block NSError *err = nil;
     void (^job)(void) = ^{
