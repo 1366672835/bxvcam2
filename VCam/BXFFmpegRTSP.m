@@ -310,7 +310,25 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
 
 #pragma mark - 启动
 
+// 生命周期串行化：open/find_stream_info 必须在 _decodeQueue 上执行，
+// 否则 stop() 的 dispatch_sync 无法等它，会释放正在握手的 _fmt ——
+// Aweme-2026-11-05 04:37 的 ff_rtsp_connect 空指针崩溃就是这么来的。
 - (BOOL)startWithURLString:(NSString *)urlString error:(NSError **)error {
+    __block BOOL ok = NO;
+    __block NSError *err = nil;
+    void (^job)(void) = ^{
+        ok = [self bx_startNow:urlString error:&err];
+    };
+    if (dispatch_get_specific(kBXDecodeQueueKey) == (__bridge void *)self) {
+        job();                                  // 已在解码队列上，直接跑，避免死锁
+    } else {
+        dispatch_sync(_decodeQueue, job);       // 其它线程：排队，且与 stop 互斥
+    }
+    if (!ok && error) *error = err;
+    return ok;
+}
+
+- (BOOL)bx_startNow:(NSString *)urlString error:(NSError **)error {
     [self stop];
     for (int i = 0; i < 120 && _loopActive; i++) usleep(50 * 1000);
     _generation++;
@@ -1508,7 +1526,20 @@ static const BOOL kBXEnableHardwareDecode = NO;
     [_lock lock];
     if (_aRing) {
         size_t need = (size_t)got;
-        if (ch < 1) ch = 1;                      // 同上：与 2 声道分配保持一致
+        // 音频延迟上限：超过 ~150ms 就丢最旧的，避免声音越跑越超前于画面
+      {
+          size_t capFrames = (size_t)(_aSrcRate > 0 ? _aSrcRate * 0.15 : 7200);
+          if (capFrames < 1024) capFrames = 1024;
+          if (_aFillFrames > capFrames) {
+              size_t drop = _aFillFrames - capFrames;
+              if (drop && _aFillFrames > drop) {
+                  memmove(_aRing, _aRing + drop * ch, (_aFillFrames - drop) * ch * sizeof(float));
+                  _aFillFrames -= drop;
+                  _aLateDrops = (_aLateDrops ? _aLateDrops : 0) + drop;
+              }
+          }
+      }
+      if (ch < 1) ch = 1;
       if (ch > 2) ch = 2;
       if (need >= _aRingFrames) need = _aRingFrames;
         if (_aFillFrames + need > _aRingFrames) {
