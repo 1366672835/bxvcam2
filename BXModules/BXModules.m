@@ -21,7 +21,7 @@
 @implementation BXPickerProxy
 
 - (void)documentPicker:(UIDocumentPickerViewController *)c
-didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {  @try {
+didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSURL *u = urls.firstObject;
     if (!u) return;
 
@@ -83,8 +83,8 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {  @try {
         }
     }
 
-      @try { if (self.onPick) self.onPick(keep); } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 选片回调异常 %@", e.reason); }
-  } @catch (NSException *bxde) { NSLog(@"[BXFloat][vcam] 选片代理异常 %@: %@", bxde.name, bxde.reason); }
+    if (self.onPick) self.onPick(keep);
+}
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)c {
     NSLog(@"[BXFloat][vcam] 选择取消");
@@ -124,9 +124,10 @@ void BXRegisterBuiltinModules(void) {
     // 选片回调：载入视频 + 刷新面板
     if (!gPicker) {
         gPicker = [BXPickerProxy new];
-          gPicker.onPick = ^(NSURL *url) {
-              // 载入放后台：AVAssetReader 建轨、读首帧都可能在主线程抛异常/卡住；
-              // 后台跑完再回主线程刷 UI（崩溃日志里是主队列 block 抛 NSException → SIGABRT）
+        gPicker.onPick = ^(NSURL *url) {
+            // url 已经是 move 之后的新位置（Documents/…）；直接用它，别再用 picker 给的旧路径
+              // 载入放后台：AVFoundation 建 reader/读首帧在某些文件上会抛 NSException，
+              // 主线程 block 里抛出去就是 SIGABRT（Aweme-2026-11-05 05:06）。
               dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                   @autoreleasepool {
                       @try {
@@ -136,13 +137,13 @@ void BXRegisterBuiltinModules(void) {
                           if (ok) [[BXFloatStore shared] setObject:url.path forKey:@"bx.vcam.path"];
                       } @catch (NSException *ex) {
                           NSLog(@"[BXFloat][vcam] 选片异常 %@: %@", ex.name, ex.reason);
-                      } @catch (...) { NSLog(@"[BXFloat][vcam] 选片未知异常"); }
+                      }
                       dispatch_async(dispatch_get_main_queue(), ^{
                           @try { [[BXFloatWindow shared].menu reload]; } @catch (__unused NSException *e2) {}
                       });
                   }
               });
-          };
+        };
     }
 
     // ---- 主开关 ----
