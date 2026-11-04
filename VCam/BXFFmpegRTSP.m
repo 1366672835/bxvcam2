@@ -1,4 +1,4 @@
-//
+﻿//
 //  BXFFmpegRTSP.m —— RTSP 拉流（结构与参数照百相 0.20.33 反汇编结果）
 //
 //  打开参数（0x3312b0 四次 av_dict_set）：
@@ -1504,7 +1504,9 @@ static const BOOL kBXEnableHardwareDecode = NO;
     [_lock lock];
     if (_aRing) {
         size_t need = (size_t)got;
-        if (need >= _aRingFrames) need = _aRingFrames;
+        if (ch < 1) ch = 1;                      // 同上：与 2 声道分配保持一致
+      if (ch > 2) ch = 2;
+      if (need >= _aRingFrames) need = _aRingFrames;
         if (_aFillFrames + need > _aRingFrames) {
             size_t drop = _aFillFrames + need - _aRingFrames;
             if (drop > _aFillFrames) drop = _aFillFrames;
