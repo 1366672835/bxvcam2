@@ -1,0 +1,164 @@
+﻿name: build-dylib
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 300        # 双架构全组件冷编译 40~70 分钟，留足余量
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          if [ -d /Applications/Xcode.app ]; then
+            sudo xcode-select -s /Applications/Xcode.app
+          fi
+          xcodebuild -version || true
+          clang --version | head -n 1
+
+      - name: Install Theos
+        run: |
+          set -euo pipefail
+          THEOS_DIR="$HOME/theos"
+          echo "THEOS=$THEOS_DIR" >> "$GITHUB_ENV"
+          echo "$THEOS_DIR/bin" >> "$GITHUB_PATH"
+
+          git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS_DIR"
+          mkdir -p "$THEOS_DIR/sdks"
+
+          curl -fL -o /tmp/sdks.tar.gz \
+            https://github.com/theos/sdks/archive/refs/heads/master.tar.gz
+          tar xzf /tmp/sdks.tar.gz -C /tmp
+          cp -R /tmp/sdks-master/*.sdk "$THEOS_DIR/sdks/" || true
+          ls "$THEOS_DIR/sdks/"
+
+      - name: Install ldid
+        run: |
+          set -euo pipefail
+          brew install ldid || true
+          which ldid || echo "ldid not found"
+
+      - name: Cache FFmpeg
+        id: ffcache
+        uses: actions/cache@v4
+        with:
+          # 只缓存产物；vendor/ffmpeg-7.1 源码和 build-* 中间目录几百 MB，不该进缓存
+          path: vendor/ffmpeg-ios
+          key: ffmpeg-min-1
+
+      - name: Build FFmpeg (arm64 + arm64e, minimal)
+        # 命中缓存就跳过：脚本保持原样（否则 hash 变了缓存又失效），
+        # 跳过逻辑放在 workflow 里，不动 scripts/build-ffmpeg-ios.sh。
+        if: steps.ffcache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build-ffmpeg-ios-minimal.sh
+          ./scripts/build-ffmpeg-ios-minimal.sh
+          echo "--- ffmpeg libs ---"
+          ls -lh vendor/ffmpeg-ios/lib | head -20
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          make clean || true
+          make -j4
+
+      - name: Verify
+        run: |
+          set -euo pipefail
+          DY=$(find .theos/obj -name 'BXFloatVCam.dylib' -type f | head -n1)
+          if [ -z "$DY" ]; then
+            echo "::error::BXFloatVCam.dylib not produced"
+            exit 1
+          fi
+          echo "artifact: $DY"
+          file "$DY"
+
+          echo "--- architectures ---"
+          ARCHS_OUT="$(lipo -archs "$DY")"
+          echo "$ARCHS_OUT"
+          # 缺切片必须让 CI 失败：只有 arm64 时 TrollFools 在 A12+ 注入会闪退，
+          # 而旧的 verify 用 `|| true` 会把这种情况吞掉。
+          case " $ARCHS_OUT " in
+            *" arm64 "*)  ;;
+            *) echo "::error::dylib 缺 arm64 切片（实际：$ARCHS_OUT）"; exit 1 ;;
+          esac
+          case " $ARCHS_OUT " in
+            *" arm64e "*) ;;
+            *) echo "::error::dylib 缺 arm64e 切片（实际：$ARCHS_OUT）——多半是某一份 FFmpeg 编失败被 || true 吃掉"; exit 1 ;;
+          esac
+
+          echo "--- size ---"
+          ls -lh "$DY"
+
+          echo "--- install_name ---"
+          otool -D "$DY"
+          # FAT 包会输出多段：
+          #   xxx.dylib (architecture arm64):
+          #   @executable_path/BXFloatVCam.dylib
+          #   xxx.dylib (architecture arm64e):
+          #   @executable_path/BXFloatVCam.dylib
+          # 架构头行都带冒号，install name 不带 —— 按这个过滤后去重。
+          IN="$(otool -D "$DY" | grep -v ':$' | sed '/^$/d' | sort -u | tr -d '[:space:]')"
+          # 切片数用 lipo 数，不依赖 otool 头部是否带冒号（不同版本格式会变）
+          set -- $ARCHS_OUT
+          ARCH_NAMES="$#"
+          echo "slices: $ARCH_NAMES ($ARCHS_OUT)  install_name: $IN"
+          if [ "$IN" != "@executable_path/BXFloatVCam.dylib" ]; then
+            echo "::error::install_name=$IN（应为 @executable_path/BXFloatVCam.dylib，否则注入后加载不到）"
+            exit 1
+          fi
+          if [ "$ARCH_NAMES" != "2" ]; then
+            echo "::error::切片数=$ARCH_NAMES（应为 2，实际：$ARCHS_OUT）"
+            exit 1
+          fi
+
+          echo "--- dependencies ---"
+          otool -L "$DY"
+          # FFmpeg 必须是静态链接：出现 libav*.dylib 说明链接方式错了
+          if otool -L "$DY" | grep -E 'libav(format|codec|util)|libsw(scale|resample)' >/dev/null; then
+            echo "::error::检测到动态依赖 libav*/libsw*，应为静态链接"
+            otool -L "$DY" | grep -E 'libav|libsw' || true
+            exit 1
+          fi
+          # 符号检查只做提示，不作为失败条件。
+          # 原因：Theos 默认会对产物 strip，静态链接进来的 FFmpeg 符号
+          # 可能已经不在符号表里 —— 之前把这条当硬失败，属于误报。
+          # 「FFmpeg 真的链进来了」由上面两条保证：otool -L 无 libav*/libsw* 动态依赖，
+          # 且 dylib 能正常产出（缺符号会链接失败）。
+          echo "--- symbols (informational) ---"
+          for _a in $ARCHS_OUT; do
+            for sym in avformat_open_input avcodec_send_packet swr_convert; do
+              if nm -arch "$_a" "$DY" 2>/dev/null | grep -qE "[Tt] _$sym$"; then
+                echo "  $_a $sym: 符号可见"
+              else
+                echo "  $_a $sym: 已被 strip（不影响运行）"
+              fi
+            done
+          done
+          echo "verify: OK"
+
+          if command -v ldid >/dev/null 2>&1; then
+            ldid -S "$DY"
+            echo "ldid: 签名完成"
+          else
+            echo "::warning::找不到 ldid，未做 ad-hoc 签名（TrollStore 注入通常仍可加载，但不保证）"
+          fi
+
+          mkdir -p dist
+          cp -f "$DY" dist/BXFloatVCam.dylib
+          shasum -a 256 dist/BXFloatVCam.dylib
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: BXFloatVCam-dylib
+          path: dist/BXFloatVCam.dylib
+          if-no-files-found: error
