@@ -68,7 +68,7 @@ jobs:
             tar xf /tmp/ffmpeg.tar.xz -C vendor
           fi
           ls vendor/ffmpeg-7.1/configure
-          ./scripts/build-ffmpeg-ios-minimal.sh vendor/ffmpeg-7.1 vendor/ffmpeg-ios
+          ./scripts/build-ffmpeg-ios-minimal.sh "$PWD/vendor/ffmpeg-7.1" "$PWD/vendor/ffmpeg-ios"
           echo "--- ffmpeg libs ---"
           ls -lh vendor/ffmpeg-ios/lib | head -20
 
