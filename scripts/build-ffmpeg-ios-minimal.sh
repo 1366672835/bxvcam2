@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 #
 # 精简版 FFmpeg 构建（备用，不自动生效）
 # ---------------------------------------------------------------
@@ -39,11 +39,11 @@ for ARCH in $ARCHS; do
         EXTRA=""
     else
         HOST="arm64e-apple-darwin"
-        EXTRA="--extra-cflags=-arch\ arm64e --extra-ldflags=-arch\ arm64e"
+        EXTRA=""   # -arch 已包含在 --cc/--cxx/--as 里，不再重复
     fi
 
     # 关键：--disable-everything 之后按需打开
-    eval "$SRC/configure" \
+    "$SRC/configure" \
         --prefix="$PWD/install" \
         --target-os=darwin \
         --arch=aarch64 \
