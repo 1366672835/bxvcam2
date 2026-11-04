@@ -124,13 +124,13 @@ void BXRegisterBuiltinModules(void) {
     // 选片回调：载入视频 + 刷新面板
     if (!gPicker) {
         gPicker = [BXPickerProxy new];
-        gPicker.onPick = ^(NSURL *url) {
+        gPicker.onPick = ^(NSURL *url) {  @try {
             // url 已经是 move 之后的新位置（Documents/…）；直接用它，别再用 picker 给的旧路径
             NSError *e = nil;
             BOOL ok = [[BXCaptureBridge shared] useVideoAtPath:url.path error:&e];
             NSLog(@"[BXFloat][vcam] 选片 %@ -> %@", url.lastPathComponent, ok ? @"成功" : e.localizedDescription);
             [[BXFloatStore shared] setObject:url.path forKey:@"bx.vcam.path"];
-            [[BXFloatWindow shared].menu reload];
+            [[BXFloatWindow shared].menu reload]; } @catch (NSException *bxex) { NSLog(@"[BXFloat][vcam] 选片异常 %@: %@", bxex.name, bxex.reason); } @catch (...) { NSLog(@"[BXFloat][vcam] 选片未知异常"); }
         };
     }
 

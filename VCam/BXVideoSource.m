@@ -130,6 +130,7 @@ static void *kBXPoolKey = &kBXPoolKey;
 }
 
 - (BOOL)loadURL:(NSURL *)url error:(NSError **)error {
+    if (!url.isFileURL || ![[NSFileManager defaultManager] fileExistsAtPath:url.path]) { if (error) *error = [NSError errorWithDomain:@"BXVideo" code:-2 userInfo:@{NSLocalizedDescriptionKey:@"文件不存在或路径无效"}]; return NO; }
     if (!url) return NO;
     [self unload];
 
