@@ -1,80 +1,72 @@
 #!/usr/bin/env bash
-#
 # 精简版 FFmpeg（iOS 静态库，arm64 + arm64e）
-#   用法: ./build-ffmpeg-ios-minimal.sh <源码目录> <输出目录>
-#   产物: <输出>/lib/libav*.a (FAT) + <输出>/include
-#
-# 只编 VCam 用到的组件：rtsp/rtp/rtmp + h264/hevc/aac + swscale/swresample
-#
+# 用法: ./build-ffmpeg-ios-minimal.sh <源码目录> <输出目录>
+# 配方照抄 scripts/build-ffmpeg-ios.sh（已知可用），只缩小组件集合
 set -euo pipefail
 
-SRC="${1:?需要 ffmpeg 源码目录}"
-OUT="${2:?需要输出目录}"
+SRC="${1:?need ffmpeg src}"
+PREFIX="${2:?need out dir}"
 ARCHS="${ARCHS:-arm64 arm64e}"
-MIN_IOS="${MIN_IOS:-13.0}"
+MIN_IOS="${MIN_IOS:-14.0}"
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+mkdir -p "$PREFIX"
+PREFIX="$(cd "$PREFIX" && pwd)"
 
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+CC="$(xcrun -f clang)"
 echo "SDK = $SDK"
-mkdir -p "$OUT"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$(cd "$OUT" && pwd)"
+echo "CC  = $CC"
 
+BUILT=""
 for ARCH in $ARCHS; do
-  echo "==> building ffmpeg for $ARCH"
-  BUILD="$ROOT/build-$ARCH"
-  rm -rf "$BUILD"
-  mkdir -p "$BUILD"
-  cd "$BUILD"
-
-  BASEFLAGS="-arch $ARCH -isysroot $SDK -miphoneos-version-min=$MIN_IOS"
+  BDIR="$ROOT/build-$ARCH"
+  echo ""
+  echo "==== build $ARCH ===="
+  rm -rf "$BDIR"; mkdir -p "$BDIR"; cd "$BDIR"
 
   "$SRC/configure" \
-    --prefix="$BUILD/install" \
+    --prefix="$BDIR/out" \
+    --arch=arm64 \
     --target-os=darwin \
-    --arch=aarch64 \
-    --cpu=arm64 \
-    --cc="xcrun --sdk iphoneos clang" \
-    --cxx="xcrun --sdk iphoneos clang++" \
-    --as="xcrun --sdk iphoneos clang" \
-    --ar="xcrun --sdk iphoneos ar" \
-    --ranlib="xcrun --sdk iphoneos ranlib" \
-    --strip="xcrun --sdk iphoneos strip" \
-    --enable-cross-compile \
+    --cc="$CC" \
     --sysroot="$SDK" \
-    --extra-cflags="$BASEFLAGS" \
-    --extra-cxxflags="$BASEFLAGS" \
-    --extra-ldflags="$BASEFLAGS" \
-    --enable-pic \
-    --disable-programs --disable-doc --disable-debug --disable-stripping \
-    --disable-shared --enable-static --disable-autodetect \
+    --enable-cross-compile \
+    --disable-programs --disable-doc --disable-debug \
+    --disable-autodetect \
     --disable-iconv --disable-zlib --disable-bzlib --disable-lzma \
     --disable-avdevice --disable-avfilter --disable-postproc \
-    --disable-encoders --disable-muxers --disable-filters --disable-everything \
-    --enable-network \
-    --enable-protocol=file,tcp,udp,http,https,rtmp,rtmps \
-    --enable-demuxer=rtsp,rtp,h264,hevc,aac,mov,mp4,m4v,mp3,wav,flv \
+    --disable-shared --enable-static \
+    --enable-network --enable-pic \
+    --disable-everything \
+    --enable-avformat --enable-avcodec --enable-swscale --enable-swresample \
+    --enable-protocol=file,rtsp,rtp,tcp,udp,rtmp,rtmps,http,https \
+    --enable-demuxer=rtsp,rtp,flv,mov,mp4,m4v,mpegts,h264,hevc,aac,mp3,wav \
     --enable-decoder=h264,hevc,aac,mp3,pcm_s16le,pcm_f32le,pcm_s16be,pcm_f32be \
     --enable-parser=h264,hevc,aac,mpegaudio \
     --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc \
-    --enable-swscale --enable-swresample
+    --extra-cflags="-arch $ARCH -mios-version-min=$MIN_IOS -O2" \
+    --extra-ldflags="-arch $ARCH -mios-version-min=$MIN_IOS"
 
   make -j"$(sysctl -n hw.ncpu)"
   make install
-  cd "$ROOT"
+  BUILT="$BUILT $ARCH"
+  echo "==== $ARCH done ===="
 done
 
-echo "==> 合并双架构静态库到 $OUT"
-mkdir -p "$OUT/lib" "$OUT/include"
-for LIB in avcodec avformat avutil swscale swresample; do
-  xcrun lipo -create \
-    "$ROOT/build-arm64/install/lib/lib$LIB.a" \
-    "$ROOT/build-arm64e/install/lib/lib$LIB.a" \
-    -output "$OUT/lib/lib$LIB.a"
-done
-cp -R "$ROOT/build-arm64/install/include/"* "$OUT/include/"
+echo ""
+echo "==== lipo ===="
+mkdir -p "$PREFIX/lib" "$PREFIX/include"
+FIRST="$(echo $BUILT | awk '{print $1}')"
+cp -R "$ROOT/build-$FIRST/out/include/." "$PREFIX/include/"
 
-echo "==> 验证"
-for LIB in avcodec avformat avutil swscale swresample; do
-  echo -n "lib$LIB.a archs: "
-  xcrun lipo -archs "$OUT/lib/lib$LIB.a"
+for LIB in "$ROOT/build-$FIRST/out/lib/"*.a; do
+  B="$(basename "$LIB")"
+  INPUTS=""
+  for A in $BUILT; do INPUTS="$INPUTS $ROOT/build-$A/out/lib/$B"; done
+  xcrun lipo -create $INPUTS -output "$PREFIX/lib/$B"
+  echo -n "  $B : "; xcrun lipo -archs "$PREFIX/lib/$B"
 done
+
+echo "==== done ===="
+ls -lh "$PREFIX/lib"
