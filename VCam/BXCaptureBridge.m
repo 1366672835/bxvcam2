@@ -542,7 +542,7 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 }
 
 - (BOOL)useRTSPURLString:(NSString *)urlString error:(NSError **)error {
-    BXAudioUnitHookInstall();      // 拉流时才装音频钩子（启动时不碰内存）
+      if ([[BXFloatStore shared] objectForKey:@"audio.inject"] && [[[BXFloatStore shared] objectForKey:@"audio.inject"] boolValue]) BXAudioUnitHookInstall();  // 默认关：音频 PCM 拷贝会越界（见崩溃日志 BXFloatVCam+0x3b7064）
     // 原版 0x330aa0 捕获的布尔就是 loop（见 0x33166c 的日志 "stream opened ... loop=%d"）
     id lp = [[BXFloatStore shared] objectForKey:@"rtsp.loop"];
     self.rtsp.loopPlayback = [lp isKindOfClass:[NSNumber class]] ? [lp boolValue] : YES;
