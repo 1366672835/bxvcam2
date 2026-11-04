@@ -38,6 +38,7 @@ for ARCH in $ARCHS; do
     --disable-avdevice --disable-avfilter --disable-postproc \
     --disable-shared --enable-static \
     --enable-network --enable-pic \
+    --enable-videotoolbox --enable-hwaccel=h264_videotoolbox,hevc_videotoolbox \
     --disable-everything \
     --enable-avformat --enable-avcodec --enable-swscale --enable-swresample \
     --enable-protocol=file,rtsp,rtp,tcp,udp,rtmp,rtmps,http,https \
