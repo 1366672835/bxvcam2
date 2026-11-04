@@ -51,7 +51,7 @@ jobs:
         with:
           # 只缓存产物；vendor/ffmpeg-7.1 源码和 build-* 中间目录几百 MB，不该进缓存
           path: vendor/ffmpeg-ios
-          key: ffmpeg-min-1
+          key: ffmpeg-min-vt-2
 
       - name: Build FFmpeg (arm64 + arm64e, minimal)
         # 命中缓存就跳过：脚本保持原样（否则 hash 变了缓存又失效），
