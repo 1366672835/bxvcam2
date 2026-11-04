@@ -1528,14 +1528,15 @@ static const BOOL kBXEnableHardwareDecode = NO;
         size_t need = (size_t)got;
         // 音频延迟上限：超过 ~150ms 就丢最旧的，避免声音越跑越超前于画面
       {
-          size_t capFrames = (size_t)(_aSrcRate > 0 ? _aSrcRate * 0.15 : 7200);
+          double rr = (_aOutRate > 0) ? _aOutRate : 48000.0;
+          size_t capFrames = (size_t)(rr * 0.15);
           if (capFrames < 1024) capFrames = 1024;
           if (_aFillFrames > capFrames) {
               size_t drop = _aFillFrames - capFrames;
               if (drop && _aFillFrames > drop) {
                   memmove(_aRing, _aRing + drop * ch, (_aFillFrames - drop) * ch * sizeof(float));
                   _aFillFrames -= drop;
-                  _aLateDrops = (_aLateDrops ? _aLateDrops : 0) + drop;
+                  (void)drop;   // 统计留空，避免引用不存在的成员
               }
           }
       }
