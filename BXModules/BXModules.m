@@ -21,7 +21,7 @@
 @implementation BXPickerProxy
 
 - (void)documentPicker:(UIDocumentPickerViewController *)c
-didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {  @try {
     NSURL *u = urls.firstObject;
     if (!u) return;
 
@@ -83,8 +83,8 @@ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
         }
     }
 
-    if (self.onPick) self.onPick(keep);
-}
+      @try { if (self.onPick) self.onPick(keep); } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 选片回调异常 %@", e.reason); }
+  } @catch (NSException *bxde) { NSLog(@"[BXFloat][vcam] 选片代理异常 %@: %@", bxde.name, bxde.reason); }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)c {
     NSLog(@"[BXFloat][vcam] 选择取消");
@@ -124,14 +124,25 @@ void BXRegisterBuiltinModules(void) {
     // 选片回调：载入视频 + 刷新面板
     if (!gPicker) {
         gPicker = [BXPickerProxy new];
-        gPicker.onPick = ^(NSURL *url) {  @try {
-            // url 已经是 move 之后的新位置（Documents/…）；直接用它，别再用 picker 给的旧路径
-            NSError *e = nil;
-            BOOL ok = [[BXCaptureBridge shared] useVideoAtPath:url.path error:&e];
-            NSLog(@"[BXFloat][vcam] 选片 %@ -> %@", url.lastPathComponent, ok ? @"成功" : e.localizedDescription);
-            [[BXFloatStore shared] setObject:url.path forKey:@"bx.vcam.path"];
-            [[BXFloatWindow shared].menu reload]; } @catch (NSException *bxex) { NSLog(@"[BXFloat][vcam] 选片异常 %@: %@", bxex.name, bxex.reason); } @catch (...) { NSLog(@"[BXFloat][vcam] 选片未知异常"); }
-        };
+          gPicker.onPick = ^(NSURL *url) {
+              // 载入放后台：AVAssetReader 建轨、读首帧都可能在主线程抛异常/卡住；
+              // 后台跑完再回主线程刷 UI（崩溃日志里是主队列 block 抛 NSException → SIGABRT）
+              dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                  @autoreleasepool {
+                      @try {
+                          NSError *e = nil;
+                          BOOL ok = [[BXCaptureBridge shared] useVideoAtPath:url.path error:&e];
+                          NSLog(@"[BXFloat][vcam] 选片 %@ -> %@", url.lastPathComponent, ok ? @"成功" : (e.localizedDescription ?: @"失败"));
+                          if (ok) [[BXFloatStore shared] setObject:url.path forKey:@"bx.vcam.path"];
+                      } @catch (NSException *ex) {
+                          NSLog(@"[BXFloat][vcam] 选片异常 %@: %@", ex.name, ex.reason);
+                      } @catch (...) { NSLog(@"[BXFloat][vcam] 选片未知异常"); }
+                      dispatch_async(dispatch_get_main_queue(), ^{
+                          @try { [[BXFloatWindow shared].menu reload]; } @catch (__unused NSException *e2) {}
+                      });
+                  }
+              });
+          };
     }
 
     // ---- 主开关 ----
