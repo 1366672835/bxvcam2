@@ -611,8 +611,6 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
           if (!s) return;
           [s recreateVTSession];
       });
-        [s recreateVTSession];
-    });
 }
 
 #pragma mark - 解码循环（单线程顺序）

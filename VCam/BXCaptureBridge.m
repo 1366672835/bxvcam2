@@ -964,7 +964,9 @@ static NSTimeInterval gWdogLastRestart;
     BOOL dead = !self.rtsp.isRunning;
     BOOL stalled = (now - gWdogLastChange) > 8.0;
 
-          BXLog(@"[BXFloat][wd] 拉流异常 dead=%d stalled=%d（已停用自动重开）", (int)dead, (int)stalled);
+        if (dead || stalled) {
+            BXLog(@"[BXFloat][wd] 拉流异常 dead=%d stalled=%d（已停用自动重开，请手动点「重新连接」）", (int)dead, (int)stalled);
+        }
           // 【已停用自动重开】原版没有这条看门狗。
           // 我们版本里它会在旧连接未收干净时再开一条流，实测导致：
           //   · 录制结束再点录制无响应（两条连接抢 FFmpeg 上下文）
