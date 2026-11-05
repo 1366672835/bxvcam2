@@ -78,6 +78,12 @@ static void BXFloatVCamInit(void) {
               });
               dispatch_resume(t);
           }
+
+          // 【诊断 B23】B22 + applicationDidBecomeActive 的 swizzle
+          @try {
+              static dispatch_once_t once23;
+              dispatch_once(&once23, ^{ BXInstall_BXOnAppDidBecomeActive(); });
+          } @catch (NSException *e) { NSLog(@"[B23] swizzle 异常 %@", e); }
           return;
 
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
