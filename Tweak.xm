@@ -77,7 +77,6 @@ static void BXFloatVCamInit(void) {
               // 相机一启动就撞在一起 —— 表现就是「一打开相机就卡住」。
               // 本地视频已冻结，这里不再恢复；要用时在面板手动选。
               [[BXFloatStore shared] setObject:@"" forKey:@"bx.vcam.path"];
-            }
 
             // 5. 开关与画面选项
             BXFloatStore *st = [BXFloatStore shared];
