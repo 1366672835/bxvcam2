@@ -1065,6 +1065,23 @@ static const BOOL kBXEnableHardwareDecode = NO;
     int dstW = (int)frame->width;      // 原版 dstW = srcW
     int dstH = (int)frame->height;     // 原版 dstH = srcH
 
+      // 【性能】摄像头给的是 420f/420v 时，直接 sws 到 NV12 + 摄像头尺寸，
+      // 省掉「BGRA 整帧 → VT 再转 NV12 并缩放」这一跳（预览+录制同时跑时的主要开销）。
+      {
+          OSType cf = (OSType)_camFmt;
+          BOOL camBi = (cf == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ||
+                        cf == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
+          if (camBi && _camW >= 2 && _camH >= 2) {
+              dstPix = AV_PIX_FMT_NV12;
+              biplanar = YES;
+              dstW = (int)_camW;
+              dstH = (int)_camH;
+              camFmt = cf;
+          } else {
+              camFmt = cf;
+          }
+      }
+
     if (!_sws || frame->width != _srcW || frame->height != _srcH ||
         dstW != _srcW2 || dstH != _srcH2 || _dstPix != (int)dstPix) {
         if (_sws) { sws_freeContext(_sws); _sws = NULL; }
@@ -1083,7 +1100,7 @@ static const BOOL kBXEnableHardwareDecode = NO;
     // 之前我们是 sws_scale → malloc 缓冲 → 逐行 memcpy 进 CVPixelBuffer，
     // 一帧要拷两遍 8MB，48fps 就是 768MB/s 的额外内存带宽。
     // 原版池格式就是 32BGRA（0x332398 处 movk #0x4247 → 'BGRA'）
-    OSType outFmt = (OSType)kCVPixelFormatType_32BGRA;
+      OSType outFmt = biplanar ? camFmt : (OSType)kCVPixelFormatType_32BGRA;
     CVPixelBufferPoolRef pool = [self srcPoolForSize:CGSizeMake(dstW, dstH) format:outFmt];
     CVPixelBufferRef px = NULL;
     if (pool) {
@@ -1097,7 +1114,7 @@ static const BOOL kBXEnableHardwareDecode = NO;
             (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
         };
         CVPixelBufferCreate(kCFAllocatorDefault, (size_t)_srcW, (size_t)_srcH,
-                            kCVPixelFormatType_32BGRA,
+                            outFmt,
                             (__bridge CFDictionaryRef)attrs, &px);
     }
     if (!px) return;
