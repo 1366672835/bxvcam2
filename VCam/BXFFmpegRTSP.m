@@ -157,6 +157,7 @@ static NSString *BXFFErr(int code) {
 - (void)publishHardwareFrame:(CVImageBufferRef)buffer;
 - (void)enqueueFrame:(CVImageBufferRef)buffer pts:(CMTime)pts;
 - (void)publishFrame:(AVFrame *)frame;
+    gLastDecodeTick = CACurrentMediaTime();   // 新的一帧解出来了
 - (void)setupVideoToolboxForParameters:(AVCodecParameters *)par;
 - (void)recreateVTSession;
 - (BOOL)rebuildSwr;
@@ -1234,6 +1235,10 @@ static const BOOL kBXEnableHardwareDecode = NO;
     CVPixelBufferRelease(src);
     return dst;
 }
+
+static NSTimeInterval gLastDecodeTick = 0;
+- (NSTimeInterval)lastDecodeTick { return gLastDecodeTick; }
+
 
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
     [self releaseDueFrames];

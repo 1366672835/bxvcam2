@@ -24,6 +24,7 @@
 /// 统计
 @property (atomic, readonly) NSString *lastReason;   // 上次取帧失败的原因
 @property (nonatomic, readonly) NSUInteger decodedFrames;
+- (NSTimeInterval)lastDecodeTick;   // 最后一帧新解出的时刻（音画同步用）
 @property (nonatomic, readonly) NSUInteger droppedFrames;
 
 /// 按摄像头的实际像素格式重建解码输出（420f / 420v 差异会影响色阶）

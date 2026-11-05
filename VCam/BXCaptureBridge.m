@@ -713,7 +713,7 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 // 供 AudioUnit 钩子拉取：float32 交错立体声（源 48k）
 static NSTimeInterval gLastVideoTick = 0;
 
-- (NSTimeInterval)lastVideoTick { return gLastVideoTick; }
+- (NSTimeInterval)lastVideoTick { return [self.rtsp lastDecodeTick]; }
 
 - (NSUInteger)pullAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
