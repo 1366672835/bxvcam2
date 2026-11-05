@@ -1265,7 +1265,7 @@ static NSTimeInterval gLastDecodeTick = 0;
 
 
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
-    [self releaseDueFrames];
+    // 原版写帧入口（0x32ff78）没有"释放到期帧"这一步，这里也去掉，热路径更接近原版。
     if (!dst) return NO;
 
     // 【自适应跳帧】写帧在采集回调里同步做：录制时抖音自己也占着 GPU/编码器，
@@ -1411,11 +1411,10 @@ static NSTimeInterval gLastDecodeTick = 0;
     }
 
     // 原版只有一个设置：kVTScalingMode_CropSourceToCleanAperture
-    if (!*modeSet) {
-        VTSessionSetProperty(*slot, kVTPixelTransferPropertyKey_ScalingMode,
-                             kVTScalingMode_Normal);   // Normal 才会真正缩放（Crop 只裁剪，尺寸不同就失败）
-        *modeSet = YES;
-    }
+    // 原版 0x330074：每次写帧都重新设一次缩放模式（属性可能被系统重置）
+    VTSessionSetProperty(*slot, kVTPixelTransferPropertyKey_ScalingMode,
+                         kVTScalingMode_Normal);
+
 
     OSStatus st = VTPixelTransferSessionTransferImage(*slot, src, dst);
     if (st != noErr) {

@@ -1080,11 +1080,8 @@ static NSTimeInterval gWdogLastRestart;
                     // 原版 0x330088：VT 直接把槽位帧写进摄像头缓冲（GPU→GPU），
                     // 不锁 CPU 内存、不做 memcpy。锁 IOSurface 会强制等 GPU 同步，
                     // 每帧几十毫秒，抖音就会丢帧。
-                      // 会话重建窗口期（录制开始/结束各 3 秒内）完全不写帧：
-                      // 那段正是抖音编码器在抢同一块像素缓冲的时候，硬写必然互等。
-                      if (CACurrentMediaTime() < gBXNoWriteUntil) {
-                          self.passthroughFrames += 1;
-                      } else
+                    // 原版热路径：没有"让路"概念，每帧只做 锁A取帧 → 锁B+VT → 转发。
+                    // 这里保留一行注释，具体判断已删除（B39 对齐原版）。
                     renderedDirect = [self.rtsp renderLatestInto:camPx];
                     if (renderedDirect) {
                         self.replacedFrames += 1;
