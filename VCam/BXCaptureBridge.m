@@ -943,6 +943,13 @@ static NSTimeInterval gWdogLastRestart;
 
 - (void)install {
     if (self.installed) return;
+
+      // 【诊断 B17】钩子全部关闭：dylib 在、面板照常，但完全不碰采集会话。
+      // 判定"一打开相机就卡"是不是这 5 个钩子造成的。
+      {
+          BXLog(@"[BXFloat][vcam] 【诊断模式】capture 钩子已全部禁用");
+          return;
+      }
     BXMigrateOldKeys();
 
     SEL setSel = @selector(setSampleBufferDelegate:queue:);
