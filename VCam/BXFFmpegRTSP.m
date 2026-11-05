@@ -1320,6 +1320,11 @@ static NSTimeInterval gLastDecodeTick = 0;
                                                           (CVImageBufferRef)dst,
                                                           fd, &timing, &out);
     CVPixelBufferRelease(dst);   // 样本已持有
+    {
+        static int sOk = 0, sBad = 0;
+        if (st == noErr && out) { if (sOk++ < 3) BXLog(@"[BXRTSP] 造样本成功 %dx%d fmt=%08x 第%d次", (int)dim.width, (int)dim.height, (unsigned)fmt, sOk); }
+        else { if (sBad++ < 5) BXLog(@"[BXRTSP] 造样本失败 st=%d out=%p fd=%p %dx%d fmt=%08x", (int)st, out, fd, (int)dim.width, (int)dim.height, (unsigned)fmt); }
+    }
     if (st != noErr || !out) return NULL;
     return out;
 }
