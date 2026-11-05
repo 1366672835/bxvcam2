@@ -157,7 +157,6 @@ static NSString *BXFFErr(int code) {
 - (void)publishHardwareFrame:(CVImageBufferRef)buffer;
 - (void)enqueueFrame:(CVImageBufferRef)buffer pts:(CMTime)pts;
 - (void)publishFrame:(AVFrame *)frame;
-    gLastDecodeTick = CACurrentMediaTime();   // 新的一帧解出来了
 - (void)setupVideoToolboxForParameters:(AVCodecParameters *)par;
 - (void)recreateVTSession;
 - (BOOL)rebuildSwr;
@@ -1097,6 +1096,7 @@ static const BOOL kBXEnableHardwareDecode = NO;
 }
 
 - (void)enqueueFrame:(CVImageBufferRef)buffer pts:(CMTime)pts {
+    gLastDecodeTick = CACurrentMediaTime();   // 新的一帧解出来了
     if (!buffer) return;
 
     // VT 回调线程上只做一件事：把最新原始帧放进槽。
