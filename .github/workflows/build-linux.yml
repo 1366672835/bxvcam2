@@ -120,6 +120,8 @@ jobs:
             # C 源
             clang-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" $FLAGS $INC \
               -c VCam/BXFishhook.c -o build/objs/$ARCH/BXFishhook.o
+            # Linux 的 ar 生成 GNU 索引，ld64.lld 只认 BSD 符号表 → 补 ranlib
+            for lib in vendor/ff-build-$ARCH/out/lib/*.a; do llvm-ranlib-18 "$lib"; done
 
             clang++-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" \
               -dynamiclib -fuse-ld=/usr/bin/ld64.lld-18 \
