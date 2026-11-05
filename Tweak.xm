@@ -42,10 +42,6 @@ static void BXAttachIfNeeded(void) {
     });
 }
 
-static void BXUnusedOnBecomeActive(id self, SEL _cmd, id app) {   // 保留签名避免其它引用报错，但不再被 hook 调用
-    BXCallOrig(BXOnAppDidBecomeActive_orig, self, _cmd, app);
-    BXAttachIfNeeded();
-}
 
 #pragma mark - 启动
 
