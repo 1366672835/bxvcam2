@@ -205,8 +205,6 @@
 #pragma mark - 取帧显示
 
 - (void)pumpFrame {
-    // 【诊断 B34】预览取帧完全停掉：判定"冻住"是不是预览线程和采集线程抢同一把锁。
-    return;
     // 预览取帧 = 分配缓冲 + 整帧 VT 拷贝，绝不能放主线程：
     // 一开录制（抖音自己也在编码）主线程被它占满 → 界面卡死。
     static dispatch_queue_t bq = NULL;
