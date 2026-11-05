@@ -1523,6 +1523,20 @@ static NSTimeInterval gLastDecodeTick = 0;
         memcpy(_aRing + _aFillFrames * ch, _aTmp + (got - (int)need) * ch,
                need * ch * sizeof(float));
         _aFillFrames += need;
+          // 延迟上限：环形缓冲最多保留 ~150ms 音频。
+          // 解码塞得比播放快，不封顶的话声音会越跑越超前于画面（实测不同步就是这个原因）。
+          {
+              double ar = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
+              size_t capFrames = (size_t)(ar * 0.15);
+              if (capFrames < 1024) capFrames = 1024;
+              if (_aFillFrames > capFrames) {
+                  size_t d2 = _aFillFrames - capFrames;
+                  if (d2 > 0 && d2 < _aFillFrames) {
+                      memmove(_aRing, _aRing + d2 * ch, (_aFillFrames - d2) * ch * sizeof(float));
+                      _aFillFrames -= d2;
+                  }
+              }
+          }
     }
     [_lock unlock];
 }
