@@ -72,13 +72,11 @@ static void BXFloatVCamInit(void) {
         @try {
             [[BXFloatRegistry shared] restoreAll];
 
-            // 4. 恢复上次选的视频
-            NSString *path = [[BXFloatStore shared] objectForKey:@"bx.vcam.path"];
-            if (path.length) {
-                NSError *e = nil;
-                if (![[BXCaptureBridge shared] useVideoAtPath:path error:&e]) {
-                    NSLog(@"[BXFloat][vcam] 恢复视频失败: %@", e);
-                }
+              // 4.【已移除】自动恢复上次的本地视频。
+              // 原来 dylib 加载（主线程）就去打开那个文件：建 reader、解首帧全在主线程，
+              // 相机一启动就撞在一起 —— 表现就是「一打开相机就卡住」。
+              // 本地视频已冻结，这里不再恢复；要用时在面板手动选。
+              [[BXFloatStore shared] setObject:@"" forKey:@"bx.vcam.path"];
             }
 
             // 5. 开关与画面选项
