@@ -59,6 +59,10 @@ static void BXFloatVCamInit(void) {
         } @catch (NSException *e) {
             NSLog(@"[BXFloat][vcam] install 异常: %@", e);
         }
+
+        // 极简版没有面板，开关无法手动打开：这里强制启用替换，并打开自动开流。
+        [BXCaptureBridge shared].enabled = YES;
+        [[BXFloatStore shared] setObject:@(1) forKey:@"rtsp.enabled"];
     }
 }
 
