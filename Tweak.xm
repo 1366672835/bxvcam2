@@ -10,7 +10,6 @@
 #import "BXFloatMenuController.h"
 #import "BXFloatModule.h"
 #import "BXFloatStore.h"
-#import "BXVolumeShortcut.h"
 #import "BXAudioUnitHook.h"
 #import "BXSwizzle.h"
 #import "BXCaptureBridge.h"
@@ -92,20 +91,6 @@ static void BXFloatVCamInit(void) {
             NSLog(@"[BXFloat][vcam] 恢复状态异常: %@", e);
         }
 
-        // 6. 音量键快捷键
-        @try {
-            [[BXVolumeShortcut shared] startWithHandler:^(BOOL isVolumeUp, NSInteger taps) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (!isVolumeUp) return;
-                    if (!BXShouldAttach()) return;
-                    BXFloatWindow *w = [BXFloatWindow shared];
-                    if (w.hidden) [w attach];
-                    [w.bubble sendActionsForControlEvents:UIControlEventTouchUpInside];
-                });
-            }];
-        } @catch (NSException *e) {
-            NSLog(@"[BXFloat][vcam] 音量键异常: %@", e);
-        }
 
         // 反复尝试挂载：某些场景（冷启动、切后台回来）第一秒拿不到 windowScene，
         // 只试一次就会「插件不见了」。这里持续重试，直到挂上为止。
