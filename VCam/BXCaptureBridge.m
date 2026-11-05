@@ -984,7 +984,7 @@ static NSTimeInterval gWdogLastRestart;
     self.installed = YES;
     BXLog(@"[BXFloat][vcam] capture probe installed video_delegate audio_delegate "
           "session_output session_start_stop audio_backend=avcapture_delegate");
-    [self startWatchdog];
+    // 【诊断 B29】停用看门狗（2 秒一次的主线程定时器，之前从没被单独测过）
 }
 
 - (CMSampleBufferRef)processBuffer:(CMSampleBufferRef)sampleBuffer output:(id)output {
