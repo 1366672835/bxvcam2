@@ -645,6 +645,21 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
         // EAGAIN 期间保持原截止，6 秒后中断回调会返回 1，循环才能退出。
         if (_eagainStreak == 0) [self armDeadlineUs:6000000];
         int ret = av_read_frame(_fmt, pkt);
+        // 本地文件要按 PTS 实时播放：文件读得比实时快得多（实测 84fps vs 声明 30fps），
+        // 不节流画面就是快进。网络流天然被网络限速，不需要这段。
+        if (ret >= 0 && self.isLocalFile) {
+            AVStream *st = _fmt->streams[pkt->stream_index];
+            if (st && st->time_base.den > 0 && pkt->pts != AV_NOPTS_VALUE) {
+                int64_t us = (int64_t)(pkt->pts * av_q2d(st->time_base) * 1000000.0);
+                static int64_t sFileBaseUs = 0;
+                if (sFileBaseUs == 0) sFileBaseUs = av_gettime_relative() - us;
+                int64_t waitUs = (sFileBaseUs + us) - av_gettime_relative();
+                if (waitUs > 2000) {
+                    if (waitUs > 200000) waitUs = 200000;   // 卡顿时最多等 200ms，避免追帧雪崩
+                    av_usleep((unsigned)waitUs);
+                }
+            }
+        }
         if (ret >= 0) _eagainStreak = 0;
         _readMsAcc += (CACurrentMediaTime() - _t0) * 1000.0;
         if (ret < 0) {
