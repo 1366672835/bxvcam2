@@ -647,7 +647,7 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
         int ret = av_read_frame(_fmt, pkt);
         // 本地文件要按 PTS 实时播放：文件读得比实时快得多（实测 84fps vs 声明 30fps），
         // 不节流画面就是快进。网络流天然被网络限速，不需要这段。
-        if (ret >= 0 && self.isLocalFile) {
+        if (ret >= 0 && self.urlString.length && [self.urlString rangeOfString:@"://"].location == NSNotFound) {
             AVStream *st = _fmt->streams[pkt->stream_index];
             if (st && st->time_base.den > 0 && pkt->pts != AV_NOPTS_VALUE) {
                 int64_t us = (int64_t)(pkt->pts * av_q2d(st->time_base) * 1000000.0);
