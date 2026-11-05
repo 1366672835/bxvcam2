@@ -1,3 +1,17 @@
+    // 【诊断开关】kBXNoReplace = YES：完全不替换画面，直接转发原实现。
+    // 用途：判定"录制后再录制卡死"到底是不是我们写帧引起的。
+    //   关闭后不卡 → 问题在写帧路径；仍然卡 → 问题在钩子/音频，与写帧无关。
+    static const BOOL kBXNoReplace = YES;
+    if (kBXNoReplace) {
+        IMP prevIMP = NULL;
+        NSString *cname = NSStringFromClass([self class]);
+        @synchronized ([BXCaptureBridge class]) {
+            id v = gDelegatePrev[cname];
+            if (v) prevIMP = (IMP)[v pointerValue];
+        }
+        if (prevIMP) ((void (*)(id, SEL, id, CMSampleBufferRef, id))prevIMP)(self, _cmd, output, sbuf, connection);
+        return;
+    }
 
 //
 //  BXCaptureBridge.m
