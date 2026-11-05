@@ -447,6 +447,10 @@ static BOOL gAutoStartDone = NO;
 // VTPixelTransferSessionTransferImage 是同步等 GPU 的，与它的编码器互等就会整机卡死。
 static NSTimeInterval gBXNoWriteUntil = 0;
 
+void BXSetNoWriteFor(NSTimeInterval seconds) {
+    gBXNoWriteUntil = CACurrentMediaTime() + seconds;
+}
+
 @implementation BXCaptureBridge
 
 + (void)load { }

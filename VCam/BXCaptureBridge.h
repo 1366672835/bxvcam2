@@ -56,6 +56,7 @@
 // 最后一次真正把画面写进摄像头缓冲的时刻（CACurrentMediaTime）。
 // 音频用它来和画面同步：画面不动，音频就停（原版行为）。
 - (NSTimeInterval)lastVideoTick;
+void BXSetNoWriteFor(NSTimeInterval seconds);   // 让写帧停手一段时间
 - (NSUInteger)pullAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames;
 - (CVPixelBufferRef)copyPreviewFrameBGRA CF_RETURNS_RETAINED;
 - (CVPixelBufferRef)copyLatestStreamFrame CF_RETURNS_RETAINED;
