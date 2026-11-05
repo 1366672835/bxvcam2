@@ -1301,8 +1301,8 @@ static NSTimeInterval gLastDecodeTick = 0;
                                                           (CVImageBufferRef)dst,
                                                           fd, &timing, &out);
     CVPixelBufferRelease(dst);   // 样本已持有
-    return out;
     if (st != noErr || !out) return NULL;
+    return out;
 }
 
 
