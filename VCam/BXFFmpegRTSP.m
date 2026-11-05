@@ -97,6 +97,9 @@ static NSString *BXFFErr(int code) {
     float          *_aRing;
     size_t          _aRingFrames;
     size_t          _aFillFrames;
+    uint64_t        _aWriteIdx;          // 环形缓冲绝对写位置（原版 0x4a8300）
+    uint64_t        _aReadIdx;           // 消费者绝对读位置（原版 16 段读指针表，我们单消费者单段）
+    uint64_t        _aDropped;           // 因落后被跳过的帧
     float          *_aTmp;
     size_t          _aTmpCap;
     int             _aOutRate;
@@ -504,7 +507,7 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
                 _aOutCh = 2;
                 _aRingFrames = 384000;              // 照抄：约 8 秒 @48k
                 _aRing = (float *)calloc(_aRingFrames * 2, sizeof(float));
-                _aFillFrames = 0;
+    _aFillFrames = 0; _aWriteIdx = 0; _aReadIdx = 0; _aDropped = 0;
                 [self rebuildSwr];
             }
         }
@@ -685,7 +688,7 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
                 if (_aDec) avcodec_flush_buffers(_aDec);
                 [self rebuildSwr];
                 [_lock lock];
-                _aFillFrames = 0;
+    _aFillFrames = 0; _aWriteIdx = 0; _aReadIdx = 0; _aDropped = 0;
                 [_lock unlock];
                 continue;
             }
@@ -799,7 +802,7 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
         if (_swr) { swr_free(&_swr); _swr = NULL; }
         if (_aRing) { free(_aRing); _aRing = NULL; }
         if (_aTmp) { free(_aTmp); _aTmp = NULL; _aTmpCap = 0; }
-        _aFillFrames = 0;
+    _aFillFrames = 0; _aWriteIdx = 0; _aReadIdx = 0; _aDropped = 0;
         if (_fmt) { avformat_close_input(&_fmt); _fmt = NULL; }
         _loopActive = NO;
     }
@@ -1548,30 +1551,24 @@ static NSTimeInterval gLastDecodeTick = 0;
     [_lock lock];
     if (_aRing) {
         size_t need = (size_t)got;
-        if (need >= _aRingFrames) need = _aRingFrames;
-        if (_aFillFrames + need > _aRingFrames) {
-            size_t drop = _aFillFrames + need - _aRingFrames;
-            if (drop > _aFillFrames) drop = _aFillFrames;
-            memmove(_aRing, _aRing + drop * ch, (_aFillFrames - drop) * ch * sizeof(float));
-            _aFillFrames -= drop;
+        if (need > _aRingFrames) need = _aRingFrames;
+        // 【原版机制】环形写入，不做 memmove；落后的是"消费者"，不是缓冲区。
+        const float *src = _aTmp + (got - (int)need) * ch;
+        for (size_t k = 0; k < need; k++) {
+            size_t pos = (size_t)((_aWriteIdx + k) % _aRingFrames);
+            memcpy(_aRing + pos * ch, src + k * ch, (size_t)ch * sizeof(float));
         }
-        memcpy(_aRing + _aFillFrames * ch, _aTmp + (got - (int)need) * ch,
-               need * ch * sizeof(float));
-        _aFillFrames += need;
-          // 延迟上限：环形缓冲最多保留 ~150ms 音频。
-          // 解码塞得比播放快，不封顶的话声音会越跑越超前于画面（实测不同步就是这个原因）。
-          {
-              double ar = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
-              size_t capFrames = (size_t)(ar * 0.15);
-              if (capFrames < 1024) capFrames = 1024;
-              if (_aFillFrames > capFrames) {
-                  size_t d2 = _aFillFrames - capFrames;
-                  if (d2 > 0 && d2 < _aFillFrames) {
-                      memmove(_aRing, _aRing + d2 * ch, (_aFillFrames - d2) * ch * sizeof(float));
-                      _aFillFrames -= d2;
-                  }
-              }
-          }
+        _aWriteIdx += need;
+        // 消费者落后超过整个缓冲：把它的读指针推到"最老的有效帧"（原版正是推进落后段），
+        // 而不是丢弃刚刚写入的新数据。损失计入欠载统计。
+        if (_aReadIdx + _aRingFrames <= _aWriteIdx) {
+            uint64_t lost = _aWriteIdx - _aRingFrames - _aReadIdx;
+            _aReadIdx = _aWriteIdx - _aRingFrames;
+            _aDropped += lost;
+            _audioUnderruns++;
+            _audioUnderrunFrames += (NSUInteger)lost;
+        }
+        _aFillFrames = (size_t)(_aWriteIdx - _aReadIdx);
     }
     [_lock unlock];
 }
@@ -1579,18 +1576,19 @@ static NSTimeInterval gLastDecodeTick = 0;
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
-      if (ch < 1) ch = 1;
-      if (ch > 2) ch = 2;   // 环形缓冲按 2 声道分配，超出会写穿堆
+    if (ch < 1) ch = 1;
+    if (ch > 2) ch = 2;
     NSUInteger n = 0;
     [_lock lock];
-    if (_aRing && _aFillFrames > 0) {
-        n = MIN(maxFrames, _aFillFrames);
-        NSUInteger total = n * ch;
-        memcpy(dst, _aRing, total * sizeof(float));
-        if (n < _aFillFrames) {
-            memmove(_aRing, _aRing + n * ch, (_aFillFrames - n) * ch * sizeof(float));
+    if (_aRing) {
+        uint64_t avail = (_aWriteIdx > _aReadIdx) ? (_aWriteIdx - _aReadIdx) : 0;
+        n = (NSUInteger)MIN((uint64_t)maxFrames, avail);
+        for (NSUInteger k = 0; k < n; k++) {
+            size_t pos = (size_t)((_aReadIdx + k) % _aRingFrames);
+            memcpy(dst + k * ch, _aRing + pos * ch, (size_t)ch * sizeof(float));
         }
-        _aFillFrames -= n;
+        _aReadIdx += n;
+        _aFillFrames = (size_t)(_aWriteIdx - _aReadIdx);
     }
     if (n < maxFrames) {
         _audioUnderruns++;
@@ -1599,34 +1597,37 @@ static NSTimeInterval gLastDecodeTick = 0;
     [_lock unlock];
     return n;
 }
+}
 
 - (NSUInteger)copyAudioS16:(int16_t *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
-      if (ch < 1) ch = 1;
-      if (ch > 2) ch = 2;   // 环形缓冲按 2 声道分配，超出会写穿堆
+    if (ch < 1) ch = 1;
+    if (ch > 2) ch = 2;
     NSUInteger n = 0;
     [_lock lock];
-    if (_aRing && _aFillFrames > 0) {
-        n = MIN(maxFrames, _aFillFrames);
-        NSUInteger total = n * ch;
-        for (NSUInteger k = 0; k < total; k++) {
-            float v = _aRing[k];
-            if (v > 1.0f) v = 1.0f;
-            else if (v < -1.0f) v = -1.0f;
-            dst[k] = (int16_t)(v * 32767.0f);
+    if (_aRing) {
+        uint64_t avail = (_aWriteIdx > _aReadIdx) ? (_aWriteIdx - _aReadIdx) : 0;
+        n = (NSUInteger)MIN((uint64_t)maxFrames, avail);
+        for (NSUInteger k = 0; k < n; k++) {
+            size_t pos = (size_t)((_aReadIdx + k) % _aRingFrames);
+            const float *s = _aRing + pos * ch;
+            for (int c = 0; c < ch; c++) {
+                float v = s[c];
+                if (v > 1.0f) v = 1.0f; else if (v < -1.0f) v = -1.0f;
+                dst[k * ch + c] = (int16_t)(v * 32767.0f);
+            }
         }
-        if (n < _aFillFrames) {
-            memmove(_aRing, _aRing + n * ch, (_aFillFrames - n) * ch * sizeof(float));
-        }
-        _aFillFrames -= n;
+        _aReadIdx += n;
+        _aFillFrames = (size_t)(_aWriteIdx - _aReadIdx);
     }
-    if (n < maxFrames) {                       // 供不上：这次会有静音补齐（听感就是断一下）
+    if (n < maxFrames) {
         _audioUnderruns++;
         _audioUnderrunFrames += (maxFrames - n);
     }
     [_lock unlock];
     return n;
+}
 }
 
 #pragma mark - 重连 / 停止
@@ -1685,7 +1686,7 @@ static NSTimeInterval gLastDecodeTick = 0;
     if (_swr) { swr_free(&_swr); _swr = NULL; }
     if (_aRing) { free(_aRing); _aRing = NULL; }
     if (_aTmp) { free(_aTmp); _aTmp = NULL; _aTmpCap = 0; }
-    _aFillFrames = 0;
+    _aFillFrames = 0; _aWriteIdx = 0; _aReadIdx = 0; _aDropped = 0;
     if (_fmt) { avformat_close_input(&_fmt); _fmt = NULL; }
 
     self.urlString = nil;
