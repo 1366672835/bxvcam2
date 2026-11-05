@@ -202,6 +202,10 @@ static UIColor *C_LINE(void)   { return [UIColor colorWithRed:0.90 green:0.91 bl
     r1.tag = 31;
     [_pageMine addSubview:r1];
 
+    UIView *r1b = [self rowWithTitle:@"重新连接" action:@selector(reconnectTapped)];
+    r1b.tag = 37;
+    [_pageMine addSubview:r1b];
+
     UIView *r2 = [self rowWithTitle:@"选择视频" action:@selector(pickTapped)];
     r2.tag = 32;
     [_pageMine addSubview:r2];
@@ -429,7 +433,7 @@ static UIColor *C_LINE(void)   { return [UIColor colorWithRed:0.90 green:0.91 bl
     // 注意：@[ ... ] 字面量里只要有 nil 就会直接崩，
     // 这里必须逐个判空后再用（viewWithTag 找不到时返回 nil）。
     NSMutableArray *rows = [NSMutableArray array];
-    for (NSInteger t = 31; t <= 36; t++) {
+    for (NSInteger t = 31; t <= 37; t++) {   // 37 = 重新连接（原版面板同名按钮）
         UIView *row = [_pageMine viewWithTag:t];
         if (row) [rows addObject:row];
     }
@@ -895,6 +899,27 @@ static NSString *BXMaskURL(NSString *url) {
                        dispatch_get_main_queue(), ^{ [self startRTSP]; });
     }
     [self refresh];
+}
+
+// 手动重连（对齐原版面板的「重新连接」按钮）：先停再连，串行执行，
+// 绝不会像之前那个看门狗一样开出第二条连接。
+- (void)reconnectTapped {
+    NSString *u = [[BXFloatStore shared] objectForKey:@"rtsp_url"];
+    if (![u isKindOfClass:[NSString class]] || !u.length) {
+        [self alert:@"还没有地址" message:@"请先在「流地址」里填 RTSP 地址"];
+        return;
+    }
+    BXCaptureBridge *br = self.bridge;
+    [self alert:@"正在重连" message:u];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        [br stopNetworkSources];                 // 先把旧连接收干净
+        NSError *e = nil;
+        BOOL ok = [br useRTSPURLString:u error:&e];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            BXLog(@"[BXFloat][panel] 重新连接 ok=%d err=%@", (int)ok, e.localizedDescription ?: @"(null)");
+            [self refresh];
+        });
+    });
 }
 
 - (void)pickTapped { [self presentPicker]; }
