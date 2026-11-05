@@ -850,9 +850,9 @@ static void BXAddOutput(id self, SEL _cmd, id output) {
 //                把 {字符串, 控制器, 标志} 装进栈 block 异步执行
 //            → 也就是「会话一启动就自动开始拉流」
 static void BXSessionStart(id self, SEL _cmd) {
-    // 【零日志】这两个钩子不在任何路径上写日志/写盘：
-    // BXLog 内部走全局锁，录制重建会话时若与写盘线程互等，就是整机卡死。
+    BXLog(@"[BXFloat][vcam] capture session start running=%@", NSStringFromClass([self class]));   // 原版 0x32a908 同位置
     if (gOrigStartRunning) ((void (*)(id, SEL))gOrigStartRunning)(self, _cmd);
+    // 原版 0x330a04/0x330aa0 紧随其后：状态刷新 + 首个会话生效自动开流
 
     // 原版 0x330aa0「首个会话生效」：闩锁只做一次，之后即使会话反复重建也不再开流。
     if (!gAutoStartDone) {
@@ -874,7 +874,7 @@ static void BXSessionStart(id self, SEL _cmd) {
 }
 
 static void BXSessionStop(id self, SEL _cmd) {
-    // 【零日志】同上，什么都不做，只调原实现。
+    BXLog(@"[BXFloat][vcam] capture session stop running=%@", NSStringFromClass([self class]));   // 原版 0x32a9d4 同位置
     if (gOrigStopRunning) ((void (*)(id, SEL))gOrigStopRunning)(self, _cmd);
 }
 
