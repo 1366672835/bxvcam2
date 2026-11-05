@@ -1271,6 +1271,12 @@ static NSTimeInterval gLastDecodeTick = 0;
     // 【自适应跳帧】写帧在采集回调里同步做：录制时抖音自己也占着 GPU/编码器，
     // 某帧写慢之后帧会越排越多，最终把采集队列堵死（表现为"整机卡住"）。
     // 规则：这帧写超过 12ms，接下来一段时间直通不写，让采集队列把欠的帧吐出去。
+    // 【诊断 B32】工作量减半：只在偶数帧写，奇数帧直通。
+    // 如果这样就不卡 → 是"吞吐不够"；如果照旧卡 → 是"锁/死锁"。
+    {
+        static NSUInteger bxN = 0;
+        if ((bxN++ & 1u) != 0) return NO;
+    }
     if (CACurrentMediaTime() < _bxSkipUntil) return NO;
 
     CVPixelBufferRef src = NULL;
