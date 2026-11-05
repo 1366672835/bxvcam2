@@ -10,6 +10,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import "BXLog.h"
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
@@ -17,7 +18,7 @@
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 
-#define BX_LOG(fmt, ...) NSLog(@"[BXFloat][import] " fmt, ##__VA_ARGS__)
+#define BX_LOG(fmt, ...) BXLog(@"[BXFloat][import] " fmt, ##__VA_ARGS__)
 
 static const int kOutFPS = 30;
 static const int kMaxW   = 1080;
@@ -110,6 +111,7 @@ NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir) {
 
     // ---- 视频编码器：优先 VT 硬编 ----
     const AVCodec *venc_codec = avcodec_find_encoder_by_name("h264_videotoolbox");
+    BX_LOG(@"候选编码器 h264_videotoolbox = %s", venc_codec ? "有" : "无");
     if (!venc_codec) venc_codec = avcodec_find_encoder(AV_CODEC_ID_H264);
     if (!venc_codec) venc_codec = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
     if (!venc_codec) {
@@ -134,8 +136,26 @@ NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir) {
                     ? venc_codec->pix_fmts[0] : AV_PIX_FMT_YUV420P;
     if (oc->oformat->flags & AVFMT_GLOBALHEADER) venc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
-    if (avcodec_open2(venc, venc_codec, NULL) < 0) {
-        BX_LOG(@"视频编码器打开失败 %s", venc_codec->name);
+    int vopen = avcodec_open2(venc, venc_codec, NULL);
+    if (vopen < 0) {
+        BX_LOG(@"视频编码器打开失败 %s (%d)，尝试 mpeg4", venc_codec->name, vopen);
+        avcodec_free_context(&venc);
+        const AVCodec *alt = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+        if (alt) {
+            venc = avcodec_alloc_context3(alt);
+            venc->width = dstW; venc->height = dstH;
+            venc->time_base = (AVRational){1, kOutFPS};
+            venc->framerate = (AVRational){kOutFPS, 1};
+            venc->gop_size = kOutFPS; venc->max_b_frames = 0;
+            venc->bit_rate = kVideoBitrate;
+            venc->pix_fmt = alt->pix_fmts ? alt->pix_fmts[0] : AV_PIX_FMT_YUV420P;
+            if (oc->oformat->flags & AVFMT_GLOBALHEADER) venc->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+            vopen = avcodec_open2(venc, alt, NULL);
+            venc_codec = alt;
+        }
+    }
+    if (vopen < 0) {
+        BX_LOG(@"mpeg4 也打不开，转码放弃 (%d)", vopen);
         avcodec_free_context(&venc);
         avformat_free_context(oc);
         avcodec_free_context(&vdec);
