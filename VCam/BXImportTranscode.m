@@ -293,6 +293,23 @@ done:
     av_packet_free(&pkt);
     BX_LOG(@"转码完成 %@ (帧数=%lld)", name, (long long)vFrameIdx);
 
+    // 正常结束：先按成功路径收尾
+    if (oc->pb) avio_closep(&oc->pb);
+    if (aenc) avcodec_free_context(&aenc);
+    avcodec_free_context(&venc);
+    avformat_free_context(oc);
+    avcodec_free_context(&vdec);
+    if (adec) avcodec_free_context(&adec);
+    avformat_close_input(&in);
+    {
+        NSDictionary *attr = [[NSFileManager defaultManager] attributesOfItemAtPath:outPath error:nil];
+        unsigned long long sz = attr ? [attr fileSize] : 0;
+        if (vFrameIdx > 0 && sz > 4096) return outPath;
+        BX_LOG(@"转码产物无效（帧数=%lld 大小=%llu），删除", (long long)vFrameIdx, sz);
+        [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
+        return nil;
+    }
+
 fail:
     ok = NO;
     if (oc && oc->pb) avio_closep(&oc->pb);
