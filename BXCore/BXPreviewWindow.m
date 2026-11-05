@@ -205,13 +205,26 @@
 #pragma mark - 取帧显示
 
 - (void)pumpFrame {
+    // 预览取帧 = 分配缓冲 + 整帧 VT 拷贝，绝不能放主线程：
+    // 一开录制（抖音自己也在编码）主线程被它占满 → 界面卡死。
+    static dispatch_queue_t bq = NULL;
+    static dispatch_once_t oncePump;
+    dispatch_once(&oncePump, ^{ bq = dispatch_queue_create("bx.preview.pump", DISPATCH_QUEUE_SERIAL); });
+
     if (_reuseBridge) {
-        // 原版 0x329b14：先 CVPixelBufferCreate 一块 BGRA，再 0x32ff78 把槽位帧
-        // VT 复制进去，最后交给 CoreImage。不在槽位帧上直接做 CI。
-        CVPixelBufferRef px = [[BXCaptureBridge shared] copyPreviewFrameBGRA];
-        if (!px) return;
-        [self renderWithCoreImage:px];
-        CVPixelBufferRelease(px);
+        __weak typeof(self) ws = self;
+        dispatch_async(bq, ^{
+            @autoreleasepool {
+                CVPixelBufferRef px = [[BXCaptureBridge shared] copyPreviewFrameBGRA];
+                if (!px) return;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    __strong typeof(ws) s = ws;
+                    if (!s) { CVPixelBufferRelease(px); return; }
+                    [s renderWithCoreImage:px];
+                    CVPixelBufferRelease(px);
+                });
+            }
+        });
         return;
     }
     if (!_rtsp.isRunning) return;
