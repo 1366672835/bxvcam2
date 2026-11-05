@@ -1074,17 +1074,16 @@ static NSTimeInterval gWdogLastRestart;
                 BOOL renderedDirect = NO;
 
                 if (self.rtsp.isRunning) {
-                    // 【架构改动】不再写 app 的摄像头缓冲：自己造一帧同格式同尺寸的样本还回去。
-                    // B40/B41 的 A/B 已经证明：只要往它的缓冲里写就会卡（成本只有 2.5ms，
-                    // 所以不是慢，是"碰了它的缓冲"这件事本身在会话重建时会互等）。
-                    CMSampleBufferRef mineSB = [self.rtsp copySampleBufferReplacing:sampleBuffer];
-                    if (mineSB) {
+                    // 原版做法（0x32ff78）：VT 把槽位帧写进 app 的摄像头缓冲，再转发原样本。
+                    // 样本替换那条路已证明会撞 -12743 InvalidMediaFormat，原版也不这么做。
+                    renderedDirect = [self.rtsp renderLatestInto:camPx];
+                    if (renderedDirect) {
                         self.replacedFrames += 1;
                         self.replaceFPS = [self tickReplace];
-                        return mineSB;   // 调用方负责转发并释放
+                    } else {
+                        self.passNoFrame += 1;
+                        self.passthroughFrames += 1;
                     }
-                    self.passNoFrame += 1;
-                    self.passthroughFrames += 1;
                 }
 
                 // 【移除 CPU 兜底】VT 写不进去就直通，绝不去锁抖音的像素缓冲：
