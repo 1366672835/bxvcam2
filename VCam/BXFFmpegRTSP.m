@@ -1454,6 +1454,8 @@ static const BOOL kBXEnableHardwareDecode = NO;
     if (!_aDec) return NO;
     int rate = (_aOutRate > 0) ? _aOutRate : 48000;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
+      if (ch < 1) ch = 1;
+      if (ch > 2) ch = 2;   // 环形缓冲按 2 声道分配，超出会写穿堆
 
     if (!_swrLock) _swrLock = [[NSRecursiveLock alloc] init];
     [_swrLock lock];
@@ -1482,6 +1484,8 @@ static const BOOL kBXEnableHardwareDecode = NO;
     if (maxOut <= 0) return;
 
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
+      if (ch < 1) ch = 1;
+      if (ch > 2) ch = 2;   // 环形缓冲按 2 声道分配，超出会写穿堆
     size_t needBytes = (size_t)maxOut * ch * sizeof(float);
     if (!_aTmp || _aTmpCap < needBytes) {
         float *nb = realloc(_aTmp, needBytes);
@@ -1521,6 +1525,8 @@ static const BOOL kBXEnableHardwareDecode = NO;
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
+      if (ch < 1) ch = 1;
+      if (ch > 2) ch = 2;   // 环形缓冲按 2 声道分配，超出会写穿堆
     NSUInteger n = 0;
     [_lock lock];
     if (_aRing && _aFillFrames > 0) {
@@ -1543,6 +1549,8 @@ static const BOOL kBXEnableHardwareDecode = NO;
 - (NSUInteger)copyAudioS16:(int16_t *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
+      if (ch < 1) ch = 1;
+      if (ch > 2) ch = 2;   // 环形缓冲按 2 声道分配，超出会写穿堆
     NSUInteger n = 0;
     [_lock lock];
     if (_aRing && _aFillFrames > 0) {
