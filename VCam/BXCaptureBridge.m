@@ -837,51 +837,10 @@ static void BXAddOutput(id self, SEL _cmd, id output) {
 static void BXSessionStart(id self, SEL _cmd) {
     BXLog(@"[BXFloat][vcam] capture session start running=%@", NSStringFromClass([self class]));
     if (gOrigStartRunning) ((void (*)(id, SEL))gOrigStartRunning)(self, _cmd);
-
-    BXCaptureBridge *br = [BXCaptureBridge shared];
-    if (!br.installed) return;
-
-    // 探针：会话里实际有哪些 output（含我们挂钩之前就加好的）
-    {
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{ gSessionOutputsAtStart = [NSMutableArray array]; });
-        id outs = nil;
-        @try { outs = [(id)self performSelector:@selector(outputs)]; } @catch (__unused NSException *e) {}
-        if ([outs isKindOfClass:[NSArray class]]) {
-            @synchronized (gSessionOutputsAtStart) {
-                for (id o in (NSArray *)outs) {
-                    NSString *cls = NSStringFromClass([o class]);
-                    if (cls && ![gSessionOutputsAtStart containsObject:cls]) {
-                        [gSessionOutputsAtStart addObject:cls];
-                    }
-                }
-            }
-        }
-    }
-
-    // 对应 0x330a04 → 0x330a30：会话计数与状态刷新
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [br rebuildSnapshot];
-    });
-
-    // 对应 0x330aa0：首个会话生效时自动开始拉流（用已保存的开关 + 地址）
-    id wantObj = [[BXFloatStore shared] objectForKey:@"rtsp.enabled"];
-    BOOL want = [wantObj isKindOfClass:[NSNumber class]] ? [wantObj boolValue] : NO;
-    NSString *url = [[BXFloatStore shared] objectForKey:@"rtsp_url"];
-    if (!gAutoStartDone && want && [url isKindOfClass:[NSString class]] && url.length && !br.rtsp.isRunning) {
-        gAutoStartDone = YES;   // 置位后即使会话重建也不再开流
-        NSString *u = [url copy];
-          // 延后 1.5s：会话刚 start 时相机还在启动（日志里能看到中断/重建），
-          // 这时开流会和相机抢资源，表现就是「自动连上来的画面一直卡」。
-          // 手动连流不受影响（那时相机已经稳定）。
-          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                         dispatch_get_main_queue(), ^{
-              BXLog(@"[BXFloat][vcam] 会话稳定，自动开始拉流（延迟 1.5s）");
-              dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                  [br useRTSPURLString:u error:nil];
-              });
-          });
-    }
+    // 【纯透传】原版这两个钩子只"打日志 + 调原实现"，不碰采集会话。
+    // 之前我们在这里做探针/刷面板/自动开流，录制会 stop→start 重建会话，
+    // 这些活跟抖音的录制启动抢主线程，表现就是「录制时整机卡住点不了」。
+    // 现在一律不做，交给面板层自己去刷新。
 }
 
 // 原版 0x32a9d4
@@ -889,13 +848,7 @@ static void BXSessionStart(id self, SEL _cmd) {
 static void BXSessionStop(id self, SEL _cmd) {
     BXLog(@"[BXFloat][vcam] capture session stop running=%@", NSStringFromClass([self class]));
     if (gOrigStopRunning) ((void (*)(id, SEL))gOrigStopRunning)(self, _cmd);
-
-    BXCaptureBridge *br = [BXCaptureBridge shared];
-    if (br.installed) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [br rebuildSnapshot];
-        });
-    }
+    // 【纯透传】同上：录制结束时的 stop 不再附带刷面板等主线程工作。
 }
 
 
