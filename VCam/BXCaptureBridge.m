@@ -977,6 +977,8 @@ static NSTimeInterval gWdogLastRestart;
 }
 
 - (CMSampleBufferRef)processBuffer:(CMSampleBufferRef)sampleBuffer output:(id)output {
+    // 【诊断 B27】钩子在、但不写帧：判定卡死是"钩子本身"还是"写帧"引起的。
+    return sampleBuffer;
 
     BOOL isVideo = [output isKindOfClass:NSClassFromString(@"AVCaptureVideoDataOutput")];
     BOOL hasAnySource = self.rtsp.isRunning || self.source.loaded;
