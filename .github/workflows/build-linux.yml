@@ -103,6 +103,8 @@ jobs:
       - name: Compile + link (both archs)
         run: |
           set -euo pipefail
+          # lipo 出来的静态库需要补符号索引，否则 ld64.lld 报 archive has no index
+          for lib in vendor/ffmpeg-ios/lib/*.a; do llvm-ranlib-18 "$lib"; done
           INC="-IBXCore -IVCam -Ivendor/ffmpeg-ios/include"
           FLAGS="-fobjc-arc -O2 -fPIC -Wno-everything -DNDEBUG"
           FRAMEWORKS="-framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore \
