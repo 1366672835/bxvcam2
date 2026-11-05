@@ -597,13 +597,20 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
     // （BXCaptureBridge processBuffer:output: -> prepareForCameraFormat:），
     // 在这里同步重建 = 采集侧直接丢帧，用户感受就是「每按一次拍摄就卡一下」。
     // 改成丢到解码队列串行重建：期间旧会话仍然可用，画面不会黑。
-    if (!_vtFmt) return;
-    dispatch_queue_t q = _decodeQueue;
-    if (!q) return;
-    __weak typeof(self) ws = self;
-    dispatch_async(q, ^{
-        __strong typeof(ws) s = ws;
-        if (!s) return;
+      // 【关键修复】不能丢到 _decodeQueue：那个队列被 decodeLoop 长期占着
+      // （只在 stop 时退出，中间还有 av_usleep 节流），dispatch 上去的 block 永远排不到。
+      // 录制会改变摄像头格式，VT 会话必须及时重建，否则写帧用旧会话 → 卡死。
+      static dispatch_queue_t vtQ = NULL;
+      static dispatch_once_t vtOnce;
+      dispatch_once(&vtOnce, ^{
+          vtQ = dispatch_queue_create("bx.vt.rebuild", DISPATCH_QUEUE_SERIAL);
+      });
+      __weak typeof(self) ws = self;
+      dispatch_async(vtQ, ^{
+          __strong typeof(ws) s = ws;
+          if (!s) return;
+          [s recreateVTSession];
+      });
         [s recreateVTSession];
     });
 }
