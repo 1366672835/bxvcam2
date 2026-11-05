@@ -1601,7 +1601,6 @@ static NSTimeInterval gLastDecodeTick = 0;
     [_lock unlock];
     return n;
 }
-}
 
 - (NSUInteger)copyAudioS16:(int16_t *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
@@ -1628,7 +1627,6 @@ static NSTimeInterval gLastDecodeTick = 0;
     }
     [_lock unlock];
     return n;
-}
 }
 
 #pragma mark - 重连 / 停止
