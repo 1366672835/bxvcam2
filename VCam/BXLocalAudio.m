@@ -1,4 +1,4 @@
-﻿//
+//
 //  BXLocalAudio.m
 //
 //  AVAssetReader 解音轨 → PCM S16 48k 立体声，交给采集桥写进摄像头音频帧。

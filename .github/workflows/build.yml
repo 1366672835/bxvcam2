@@ -1,4 +1,4 @@
-﻿name: build-dylib
+name: build-dylib
 
 on:
   push:

@@ -1,4 +1,4 @@
-﻿#
+#
 # BXFloat VCam — 虚拟摄像头（TrollStore / 裸 dylib）
 #
 
