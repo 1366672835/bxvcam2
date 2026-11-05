@@ -222,6 +222,9 @@ static int64_t gPaceBaseUs = 0;
 
 @implementation BXFFmpegRTSP {
     NSTimeInterval _bxSkipUntil;
+    CVPixelBufferPoolRef _camPool;      // 样本替换专用池（与预览池分开，避免互相释放）
+    CGSize            _camPoolSize;
+    OSType            _camPoolFmt;
 }
 
 - (int64_t)deadlineUs { return _deadlineUs; }
@@ -1267,6 +1270,22 @@ static NSTimeInterval gLastDecodeTick = 0;
 
 // 造一帧"摄像头格式"的样本还回去 —— 完全不碰 app 的像素缓冲。
 // 这是架构层面的改动：app 那边再也不会出现我们写入的缓冲，也就不存在互等。
+- (CVPixelBufferPoolRef)camPoolForSize:(CGSize)size format:(OSType)fmt {
+    @synchronized (self) {
+        if (_camPool && CGSizeEqualToSize(_camPoolSize, size) && _camPoolFmt == fmt) return _camPool;
+        if (_camPool) { CVPixelBufferPoolRelease(_camPool); _camPool = NULL; }
+        NSDictionary *attrs = @{
+            (id)kCVPixelBufferPixelFormatTypeKey: @(fmt),
+            (id)kCVPixelBufferWidthKey: @(size.width),
+            (id)kCVPixelBufferHeightKey: @(size.height),
+            (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
+        };
+        CVPixelBufferPoolCreate(kCFAllocatorDefault, NULL, (__bridge CFDictionaryRef)attrs, &_camPool);
+        _camPoolSize = size; _camPoolFmt = fmt;
+        return _camPool;
+    }
+}
+
 - (CMSampleBufferRef)copySampleBufferReplacing:(CMSampleBufferRef)orig CF_RETURNS_RETAINED {
     if (!orig) return NULL;
     [self releaseDueFrames];
@@ -1283,7 +1302,7 @@ static NSTimeInterval gLastDecodeTick = 0;
     [_lock unlock];
     if (!src) return NULL;
 
-    CVPixelBufferPoolRef pool = [self poolForSize:CGSizeMake(dim.width, dim.height) format:fmt];
+    CVPixelBufferPoolRef pool = [self camPoolForSize:CGSizeMake(dim.width, dim.height) format:fmt];
     CVPixelBufferRef dst = NULL;
     if (!pool || CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &dst) != kCVReturnSuccess || !dst) {
         CVPixelBufferRelease(src);
