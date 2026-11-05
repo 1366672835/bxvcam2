@@ -220,7 +220,9 @@ static AVDictionary *BXBuildOpenOptions(NSString *url, BOOL preferUDP) {
 // 我们在读包后按同一模型节流，音画就自然同步、画面卡住时声音也停。
 static int64_t gPaceBaseUs = 0;
 
-@implementation BXFFmpegRTSP
+@implementation BXFFmpegRTSP {
+    NSTimeInterval _bxSkipUntil;
+}
 
 - (int64_t)deadlineUs { return _deadlineUs; }
 - (void)armDeadlineUs:(int64_t)us { _deadlineUs = av_gettime_relative() + us; }
@@ -1265,6 +1267,12 @@ static NSTimeInterval gLastDecodeTick = 0;
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
     [self releaseDueFrames];
     if (!dst) return NO;
+
+    // 【自适应跳帧】写帧在采集回调里同步做：录制时抖音自己也占着 GPU/编码器，
+    // 某帧写慢之后帧会越排越多，最终把采集队列堵死（表现为"整机卡住"）。
+    // 规则：这帧写超过 12ms，接下来一段时间直通不写，让采集队列把欠的帧吐出去。
+    if (CACurrentMediaTime() < _bxSkipUntil) return NO;
+
     CVPixelBufferRef src = NULL;
     [_lock lock];
     if (_latest) src = (CVPixelBufferRef)CVBufferRetain(_latest);
@@ -1273,7 +1281,15 @@ static NSTimeInterval gLastDecodeTick = 0;
 
     CFTimeInterval _tvt = CACurrentMediaTime();
     BOOL ok = [self transferFrom:src to:dst dedicated:YES];   // 摄像头专用会话，不和预览抢
-    _vtMsAcc += (CACurrentMediaTime() - _tvt) * 1000.0;
+    double ms = (CACurrentMediaTime() - _tvt) * 1000.0;
+    _vtMsAcc += ms;
+
+    if (ms > 12.0) {
+        double pause = ms * 3.0;
+        if (pause < 60.0) pause = 60.0;
+        if (pause > 200.0) pause = 200.0;
+        _bxSkipUntil = CACurrentMediaTime() + pause / 1000.0;
+    }
     CVPixelBufferRelease(src);
     return ok;
 }
