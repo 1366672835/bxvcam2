@@ -13,9 +13,8 @@ BXFloatVCam_FILES = Tweak.xm \
                     BXCore/BXSwizzle.m \
                     BXCore/BXLog.m \
                     BXCore/BXFloatWindow.m \
-                    BXCore/BXFloatMenuController.m \
+                    BXCore/BXSimplePanel.m \
                     BXCore/BXPreviewWindow.m \
-                    BXCore/BXFloatModule.m \
                     BXCore/BXFloatStore.m \
                     VCam/BXVideoSource.m \
                     VCam/BXFFmpegRTSP.m \
@@ -23,7 +22,6 @@ BXFloatVCam_FILES = Tweak.xm \
                     VCam/BXCaptureBridge.m \
                     VCam/BXAudioUnitHook.m \
                     VCam/BXFishhook.c \
-                    BXModules/BXModules.m
 
 BXFloatVCam_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/BXCore -I$(THEOS_PROJECT_DIR)/VCam -Wno-error -Wno-unused-function -Wno-unused-variable
 BXFloatVCam_FRAMEWORKS = UIKit Foundation CoreGraphics QuartzCore CoreImage \
