@@ -80,18 +80,6 @@ static void BXFloatVCamInit(void) {
               dispatch_resume(t);
           }
 
-          // 【正式做法】生命周期用通知监听：只补挂一次浮窗，不接管 App 的方法。
-          // 之前 swizzle applicationDidBecomeActive 会让「打开相机」整机卡死（B23 实测）。
-          @try {
-              [[NSNotificationCenter defaultCenter]
-                  addObserverForName:UIApplicationDidBecomeActiveNotification
-                              object:nil
-                               queue:[NSOperationQueue mainQueue]
-                          usingBlock:^(NSNotification *note) {
-                  if (![BXFloatWindow shared].hidden) return;
-                  if (BXShouldAttach()) BXAttachIfNeeded();
-              }];
-          } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 通知监听异常 %@", e); }
           return;
 
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
