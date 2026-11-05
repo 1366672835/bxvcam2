@@ -19,6 +19,9 @@
 #import <objc/message.h>
 #import <CoreImage/CoreImage.h>   // CIContext / CIImage（像素格式转换要用）
 
+// 导入转码（BXImportTranscode.m）：把任意视频规整成标准 mp4
+extern NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir);
+
 static const void *kBXOrigQueueKey    = &kBXOrigQueueKey;
 
 // 前置声明（install 里先用到）
