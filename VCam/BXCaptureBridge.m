@@ -470,48 +470,10 @@ static BOOL gAutoStartDone = NO;
         BXLog(@"[BXFloat][vcam] 采集中断结束，已重置时间基准");
     }];
 
-    // 退后台：给 1.5 秒宽限，预览窗开着就不停（用户在预览）
-    [nc addObserverForName:UIApplicationDidEnterBackgroundNotification
-                    object:nil queue:[NSOperationQueue mainQueue]
-                usingBlock:^(NSNotification *n) {
-        __weak typeof(self) weakSelf = self;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            __strong typeof(weakSelf) s = weakSelf;
-            if (!s) return;
-            if (UIApplication.sharedApplication.applicationState != UIApplicationStateBackground) return;
-            if (![BXPreviewWindow shared].hidden) return;      // 预览保活
-            if (!s.rtsp.isRunning) return;
-            [s stopNetworkSources];
-            BXLog(@"[BXFloat][vcam] 已退后台，停止拉流（省电/避免后台占用摄像头被系统杀）");
-        });
-    }];
-
-    // 回前台：如果用户之前开着 RTSP，自动恢复连接
-    [nc addObserverForName:UIApplicationWillEnterForegroundNotification
-                    object:nil queue:[NSOperationQueue mainQueue]
-                usingBlock:^(NSNotification *n) {
-        if (gBXCaptureInterrupted) return;
-        id savedEnabled = [[BXFloatStore shared] objectForKey:@"rtsp.enabled"];
-        BOOL want = [savedEnabled isKindOfClass:[NSNumber class]] ? [savedEnabled boolValue] : NO;
-        NSString *url = [[BXFloatStore shared] objectForKey:@"rtsp_url"];
-        if (want && url.length && !self.rtsp.isRunning) {
-            // 延迟 1 秒：刚回前台时采集会话还在恢复，
-            // 立刻 stop/start 会和它抢，正是上次 ff_sdp_parse 崩溃的窗口。
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                __strong typeof(self) s = self;
-                if (!s) return;
-                if (gBXCaptureInterrupted) return;
-                if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
-                if (s.rtsp.isRunning) return;
-                [s.rtsp resetTimeline];
-                [s useRTSPURLString:url error:nil];
-                BXLog(@"[BXFloat][vcam] 回到前台，恢复 RTSP");
-            });
-        }
-    }];
-}
+    // 【已移除】退后台停流 / 回前台自动重开流 这两个监听。
+    // 原版没有任何 App 生命周期代码：它既不在后台停流，也不在回到前台时重开。
+    // 我们这套"后台停、前台开"会与采集会话重建撞在一起（实测就是"退出再进来卡死"）。
+    // 现在拉流只在两处发生：面板手动连流、以及会话首个生效时的那一次自动开流。
 
 
 + (instancetype)shared {
