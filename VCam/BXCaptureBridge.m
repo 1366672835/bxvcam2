@@ -428,8 +428,7 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
     return u;
 }
 
-// 原版 0x4a836c：「首个会话生效」闩锁 —— 自动开流一辈子只做一次，
-// 这样录制/切页导致 session 反复 start-stop 也不会重复开流（重复开会抢上下文卡死）。
+// 原版 0x4a836c：「首个会话生效」闩锁，自动开流只做一次。
 static BOOL gAutoStartDone = NO;
 
 @implementation BXCaptureBridge
@@ -715,10 +714,6 @@ static BOOL gAutoStartDone = NO;
 - (NSString *)streamFrameReason { return self.rtsp.lastReason ?: @"-"; }
 
 // 供 AudioUnit 钩子拉取：float32 交错立体声（源 48k）
-static NSTimeInterval gLastVideoTick = 0;
-
-- (NSTimeInterval)lastVideoTick { return [self.rtsp lastDecodeTick]; }
-
 - (NSUInteger)pullAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     BXFFmpegRTSP *r = self.rtsp;
@@ -867,19 +862,15 @@ static void BXSessionStart(id self, SEL _cmd) {
     id wantObj = [[BXFloatStore shared] objectForKey:@"rtsp.enabled"];
     BOOL want = [wantObj isKindOfClass:[NSNumber class]] ? [wantObj boolValue] : NO;
     NSString *url = [[BXFloatStore shared] objectForKey:@"rtsp_url"];
-    // 对齐原版 0x330aa0：首个会话生效时自动开流，且只做一次（0x4a836c 闩锁）。
-    // 录制/切页会反复 stop→start 会话，没有这道闩锁就会重复 avformat_open_input，
-    // 两条连接抢同一个 FFmpeg 上下文 → 点录制必卡死。
-    if (!gAutoStartDone && want && [url isKindOfClass:[NSString class]] && url.length) {
-        gAutoStartDone = YES;                      // 置位：之后无论会话怎么重建都不再开流
-        if (!br.rtsp.isRunning) {
-            NSString *u = [url copy];
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                BXLog(@"[BXFloat][vcam] 首个会话生效，自动开始拉流（仅此一次）");
-                [br useRTSPURLString:u error:nil];
-            });
-        }
+    if (!gAutoStartDone && want && [url isKindOfClass:[NSString class]] && url.length && !br.rtsp.isRunning) {
+        gAutoStartDone = YES;   // 置位后即使会话重建也不再开流
+        NSString *u = [url copy];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            BXLog(@"[BXFloat][vcam] 会话启动，自动开始拉流");
+            [br useRTSPURLString:u error:nil];
+        });
     }
+}
 
 // 原版 0x32a9d4
 // 原版 0x32a9cc：日志 → 原实现 → 0x330bd4（与 0x330a04 同形）
@@ -1099,7 +1090,7 @@ static NSTimeInterval gWdogLastRestart;
                     // 每帧几十毫秒，抖音就会丢帧。
                     renderedDirect = [self.rtsp renderLatestInto:camPx];
                     if (renderedDirect) {
-                        self.replacedFrames += 1; gLastVideoTick = CACurrentMediaTime();
+                        self.replacedFrames += 1;
                         self.replaceFPS = [self tickReplace];
                     }
                 }
@@ -1123,7 +1114,7 @@ static NSTimeInterval gWdogLastRestart;
                     }
 
                     if (BXBlitInto(camPx, use)) {
-                        self.replacedFrames += 1; gLastVideoTick = CACurrentMediaTime();
+                        self.replacedFrames += 1;
                         self.replaceFPS = [self tickReplace];
                     } else {
                         self.buildError = [NSString stringWithFormat:@"写入失败 %zux%zu fmt=%08x",
