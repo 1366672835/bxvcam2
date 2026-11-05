@@ -216,6 +216,10 @@ static AVDictionary *BXBuildOpenOptions(NSString *url, BOOL preferUDP) {
     return opts;
 }
 
+// 时钟基准：原版用 av_gettime_relative + av_usleep 让整条解码循环按 PTS 走（没有音频 FIFO）。
+// 我们在读包后按同一模型节流，音画就自然同步、画面卡住时声音也停。
+static int64_t gPaceBaseUs = 0;
+
 @implementation BXFFmpegRTSP
 
 - (int64_t)deadlineUs { return _deadlineUs; }
@@ -624,6 +628,19 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
         int ret = av_read_frame(_fmt, pkt);
         if (ret >= 0) _eagainStreak = 0;
         _readMsAcc += (CACurrentMediaTime() - _t0) * 1000.0;
+          // 按 PTS 节流（对齐原版：av_rescale_q + av_gettime_relative + av_usleep）
+          if (ret >= 0 && pkt->pts != AV_NOPTS_VALUE && _fmt && pkt->stream_index < (int)_fmt->nb_streams) {
+              AVStream *pst = _fmt->streams[pkt->stream_index];
+              if (pst && pst->time_base.den > 0) {
+                  int64_t us = (int64_t)(pkt->pts * av_q2d(pst->time_base) * 1000000.0);
+                  if (gPaceBaseUs == 0) gPaceBaseUs = av_gettime_relative() - us;
+                  int64_t waitUs = (gPaceBaseUs + us) - av_gettime_relative();
+                  if (waitUs > 2000) {
+                      if (waitUs > 200000) { gPaceBaseUs -= (waitUs - 200000); waitUs = 200000; }
+                      av_usleep((unsigned)waitUs);
+                  }
+              }
+          }
         if (ret < 0) {
             _readStalls++; _errCount++;
             if (ret == AVERROR(EAGAIN)) _eagainCount++;
@@ -1597,6 +1614,7 @@ static NSTimeInterval gLastDecodeTick = 0;
 #pragma mark - 重连 / 停止
 
 - (void)stop {
+    gPaceBaseUs = 0;
     [_lock lock];
     for (int qi = 0; qi < 6; qi++) {
         if (_qBuf[qi]) { CVPixelBufferRelease(_qBuf[qi]); _qBuf[qi] = NULL; }
