@@ -92,23 +92,6 @@ static void BXFloatVCamInit(void) {
         }
 
 
-          // 前后台切换：退后台立刻停写、回前台等 2 秒再恢复。
-          // 抖音切后台会拆采集会话；我们若继续往旧缓冲写帧，回来时就会冻死。
-          @try {
-              NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-              [nc addObserverForName:UIApplicationWillResignActiveNotification
-                              object:nil queue:[NSOperationQueue mainQueue]
-                          usingBlock:^(NSNotification *n) {
-                  BXSetNoWriteFor(3600.0);   // 一直停到回前台
-              }];
-              [nc addObserverForName:UIApplicationDidBecomeActiveNotification
-                              object:nil queue:[NSOperationQueue mainQueue]
-                          usingBlock:^(NSNotification *n) {
-                  BXSetNoWriteFor(2.0);      // 回来先让开 2 秒
-                  if (BXShouldAttach() && [BXFloatWindow shared].hidden) BXAttachIfNeeded();
-              }];
-          } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 前后台监听异常 %@", e); }
-
         // 反复尝试挂载：某些场景（冷启动、切后台回来）第一秒拿不到 windowScene，
         // 只试一次就会「插件不见了」。这里持续重试，直到挂上为止。
         __block int tries = 0;
