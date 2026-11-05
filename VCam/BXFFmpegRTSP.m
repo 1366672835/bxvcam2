@@ -1265,6 +1265,45 @@ static NSTimeInterval gLastDecodeTick = 0;
 - (NSTimeInterval)lastDecodeTick { return gLastDecodeTick; }
 
 
+// 造一帧"摄像头格式"的样本还回去 —— 完全不碰 app 的像素缓冲。
+// 这是架构层面的改动：app 那边再也不会出现我们写入的缓冲，也就不存在互等。
+- (CMSampleBufferRef)copySampleBufferReplacing:(CMSampleBufferRef)orig CF_RETURNS_RETAINED {
+    if (!orig) return NULL;
+    [self releaseDueFrames];
+
+    CMFormatDescriptionRef fd = CMSampleBufferGetFormatDescription(orig);
+    if (!fd) return NULL;
+    CMVideoDimensions dim = CMVideoFormatDescriptionGetDimensions(fd);
+    if (dim.width < 2 || dim.height < 2) return NULL;
+    OSType fmt = CMFormatDescriptionGetMediaSubType(fd);
+
+    CVPixelBufferRef src = NULL;
+    [_lock lock];
+    if (_latest) src = (CVPixelBufferRef)CVBufferRetain(_latest);
+    [_lock unlock];
+    if (!src) return NULL;
+
+    CVPixelBufferPoolRef pool = [self poolForSize:CGSizeMake(dim.width, dim.height) format:fmt];
+    CVPixelBufferRef dst = NULL;
+    if (!pool || CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &dst) != kCVReturnSuccess || !dst) {
+        CVPixelBufferRelease(src);
+        return NULL;
+    }
+
+    BOOL ok = [self transferFrom:src to:dst dedicated:YES];
+    CVPixelBufferRelease(src);
+    if (!ok) { CVPixelBufferRelease(dst); return NULL; }
+
+    CMTime pts = CMSampleBufferGetPresentationTimeStamp(orig);
+    CMSampleBufferRef out = NULL;
+    OSStatus st = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
+                                                          (__bridge CVImageBufferRef)dst,
+                                                          fd, pts, &out);
+    CVPixelBufferRelease(dst);
+    if (st != noErr) return NULL;
+    return out;
+}
+
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
     [self releaseDueFrames];   // ★必须保留：_latest 只在 releaseDueFrames 里推进（我们用的是队列，不是原版的单槽）
     if (!dst) return NO;
