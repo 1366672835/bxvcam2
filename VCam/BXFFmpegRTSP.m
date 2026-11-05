@@ -1268,10 +1268,6 @@ static NSTimeInterval gLastDecodeTick = 0;
     // 原版写帧入口（0x32ff78）没有"释放到期帧"这一步，这里也去掉，热路径更接近原版。
     if (!dst) return NO;
 
-    // 【自适应跳帧】写帧在采集回调里同步做：录制时抖音自己也占着 GPU/编码器，
-    // 某帧写慢之后帧会越排越多，最终把采集队列堵死（表现为"整机卡住"）。
-    // 规则：这帧写超过 12ms，接下来一段时间直通不写，让采集队列把欠的帧吐出去。
-    if (CACurrentMediaTime() < _bxSkipUntil) return NO;
 
     CVPixelBufferRef src = NULL;
     [_lock lock];
@@ -1411,11 +1407,12 @@ static NSTimeInterval gLastDecodeTick = 0;
     }
 
     // 原版只有一个设置：kVTScalingMode_CropSourceToCleanAperture
-    // 原版 0x330074：每次写帧都重新设一次缩放模式（属性可能被系统重置）
-    VTSessionSetProperty(*slot, kVTPixelTransferPropertyKey_ScalingMode,
-                         kVTScalingMode_Normal);
-
-
+    // 属性只在会话创建后设一次（每帧 set 会拖慢单帧、并可能让 VT 失败）
+    if (!*modeSet) {
+        VTSessionSetProperty(*slot, kVTPixelTransferPropertyKey_ScalingMode,
+                             kVTScalingMode_Normal);
+        *modeSet = YES;
+    }
     OSStatus st = VTPixelTransferSessionTransferImage(*slot, src, dst);
     if (st != noErr) {
         static int sFail = 0;
