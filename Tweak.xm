@@ -62,6 +62,17 @@ static void BXFloatVCamInit(void) {
                          dispatch_get_main_queue(), ^{
               [[BXFloatWindow shared] attach];
           });
+
+          // 【诊断 B21】B20 + 音量键监听（AVAudioSession 相关，最可能与相机抢音频会话）
+          @try {
+              [[BXVolumeShortcut shared] startWithHandler:^(BOOL isVolumeUp, NSInteger taps) {
+                  dispatch_async(dispatch_get_main_queue(), ^{
+                      if (!isVolumeUp) return;
+                      BXFloatWindow *w = [BXFloatWindow shared];
+                      if (w.hidden) [w attach];
+                  });
+              }];
+          } @catch (NSException *e) { NSLog(@"[B21] 音量键异常 %@", e); }
           return;
 
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
