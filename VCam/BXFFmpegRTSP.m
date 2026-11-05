@@ -1283,6 +1283,25 @@ static NSTimeInterval gLastDecodeTick = 0;
     BOOL ok = [self transferFrom:src to:dst dedicated:YES];   // 摄像头专用会话，不和预览抢
     double ms = (CACurrentMediaTime() - _tvt) * 1000.0;
     _vtMsAcc += ms;
+    // 统计 + 自我保护：单帧写超过 25ms 就按"累积性过载"处理，
+    // 连续多次超阈值就直通一段时间（降低 50% 写入频率），避免第 3 次录制时资源耗尽。
+    {
+        static double sAvgMs = 0;
+        static int sSamples = 0;
+        static int sSlowStreak = 0;
+        static double sLogAt = 0;
+        sAvgMs += ms;
+        sSamples++;
+        if (ms > 25.0) sSlowStreak++; else if (sSlowStreak > 0) sSlowStreak--;
+        if (sSlowStreak > 6) {
+            _bxSkipUntil = CACurrentMediaTime() + 0.35;   // 让开 350ms
+            sSlowStreak = 0;
+        }
+        if (CACurrentMediaTime() - sLogAt > 5.0 && sSamples > 0) {
+            BXLog(@"[BXRTSP] 写帧 平均 %.1fms / %d 帧（最近一帧 %.1fms）", sAvgMs / sSamples, sSamples, ms);
+            sAvgMs = 0; sSamples = 0; sLogAt = CACurrentMediaTime();
+        }
+    }
 
     if (ms > 12.0) {
         double pause = ms * 3.0;
