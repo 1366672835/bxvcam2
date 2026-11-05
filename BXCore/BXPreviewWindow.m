@@ -184,7 +184,7 @@
 
 - (void)startTimer {
     [_timer invalidate];
-    _timer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 30.0
+    _timer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 20.0
                                               target:self
                                             selector:@selector(pumpFrame)
                                             userInfo:nil
@@ -194,7 +194,7 @@
 
 - (void)startAVTimer {
     [_timer invalidate];
-    _timer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 30.0
+    _timer = [NSTimer scheduledTimerWithTimeInterval:1.0 / 20.0
                                               target:self
                                             selector:@selector(pumpFrame)
                                             userInfo:nil
