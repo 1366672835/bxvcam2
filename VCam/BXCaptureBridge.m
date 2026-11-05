@@ -104,6 +104,8 @@ static void BXDelegateCapture(id self, SEL _cmd, id output,
     if (prev) {
         ((void (*)(id, SEL, id, CMSampleBufferRef, id))prev)(self, _cmd, output, rep ?: sbuf, connection);
     }
+    // rep 是我们新建的样本（+1 持有），转发完释放；原样本不动
+    if (rep && rep != sbuf) CFRelease(rep);
     depth--;
 }
 
@@ -1072,21 +1074,17 @@ static NSTimeInterval gWdogLastRestart;
                 BOOL renderedDirect = NO;
 
                 if (self.rtsp.isRunning) {
-                    [self.rtsp prepareForCameraFormat:camFmt
-                                                width:(size_t)target.width
-                                               height:(size_t)target.height];
-                    if (self.rtsp.targetFormat != camFmt) self.rtsp.targetFormat = camFmt;
-
-                    // 原版 0x330088：VT 直接把槽位帧写进摄像头缓冲（GPU→GPU），
-                    // 不锁 CPU 内存、不做 memcpy。锁 IOSurface 会强制等 GPU 同步，
-                    // 每帧几十毫秒，抖音就会丢帧。
-                    // 原版热路径：没有"让路"概念，每帧只做 锁A取帧 → 锁B+VT → 转发。
-                    // 这里保留一行注释，具体判断已删除（B39 对齐原版）。
-                    renderedDirect = [self.rtsp renderLatestInto:camPx];
-                    if (renderedDirect) {
+                    // 【架构改动】不再写 app 的摄像头缓冲：自己造一帧同格式同尺寸的样本还回去。
+                    // B40/B41 的 A/B 已经证明：只要往它的缓冲里写就会卡（成本只有 2.5ms，
+                    // 所以不是慢，是"碰了它的缓冲"这件事本身在会话重建时会互等）。
+                    CMSampleBufferRef mineSB = [self.rtsp copySampleBufferReplacing:sampleBuffer];
+                    if (mineSB) {
                         self.replacedFrames += 1;
                         self.replaceFPS = [self tickReplace];
+                        return mineSB;   // 调用方负责转发并释放
                     }
+                    self.passNoFrame += 1;
+                    self.passthroughFrames += 1;
                 }
 
                 // 【移除 CPU 兜底】VT 写不进去就直通，绝不去锁抖音的像素缓冲：
