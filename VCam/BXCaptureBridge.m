@@ -428,6 +428,10 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
     return u;
 }
 
+// 原版 0x4a836c：「首个会话生效」闩锁 —— 自动开流一辈子只做一次，
+// 这样录制/切页导致 session 反复 start-stop 也不会重复开流（重复开会抢上下文卡死）。
+static BOOL gAutoStartDone = NO;
+
 @implementation BXCaptureBridge
 
 + (void)load { }
@@ -863,10 +867,19 @@ static void BXSessionStart(id self, SEL _cmd) {
     id wantObj = [[BXFloatStore shared] objectForKey:@"rtsp.enabled"];
     BOOL want = [wantObj isKindOfClass:[NSNumber class]] ? [wantObj boolValue] : NO;
     NSString *url = [[BXFloatStore shared] objectForKey:@"rtsp_url"];
-    // 已禁用：录制时 stop->start 重建会话，若此处再开流会与旧连接抢 FFmpeg 上下文，
-    // 实测导致「点录制必卡死」。现在只在面板里手动连流。
-    (void)want; (void)url;
-}
+    // 对齐原版 0x330aa0：首个会话生效时自动开流，且只做一次（0x4a836c 闩锁）。
+    // 录制/切页会反复 stop→start 会话，没有这道闩锁就会重复 avformat_open_input，
+    // 两条连接抢同一个 FFmpeg 上下文 → 点录制必卡死。
+    if (!gAutoStartDone && want && [url isKindOfClass:[NSString class]] && url.length) {
+        gAutoStartDone = YES;                      // 置位：之后无论会话怎么重建都不再开流
+        if (!br.rtsp.isRunning) {
+            NSString *u = [url copy];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                BXLog(@"[BXFloat][vcam] 首个会话生效，自动开始拉流（仅此一次）");
+                [br useRTSPURLString:u error:nil];
+            });
+        }
+    }
 
 // 原版 0x32a9d4
 // 原版 0x32a9cc：日志 → 原实现 → 0x330bd4（与 0x330a04 同形）
