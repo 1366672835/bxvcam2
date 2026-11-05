@@ -742,37 +742,26 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 - (BOOL)useVideoAtPath:(NSString *)path error:(NSError **)error {
     if (!path.length) return NO;
 
-    // ① 先按 AVFoundation 载入（能硬解、省电）
-    @try {
-        [self.localAudio loadURL:[NSURL fileURLWithPath:path] error:NULL];
-    } @catch (NSException *e) {
-        BXLog(@"[BXFloat][vcam] 音轨载入异常 %@", e);
-    }
-    BOOL avOK = NO;
-    @try {
-        avOK = [self.source loadURL:[NSURL fileURLWithPath:path] error:error];
-    } @catch (NSException *e) {
-        BXLog(@"[BXFloat][vcam] 视频载入异常 %@", e);
-        avOK = NO;
-    }
-    if (avOK) {
-        BXLog(@"[BXFloat][vcam] 本地视频走 AVFoundation");
-        return YES;
-    }
+    // 不再使用 AVAssetReader：+[AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:outputSettings:]
+    // 在部分文件上会在 dealloc 里抛 ObjC 异常（__cxa_throw → failed_throw → terminate），
+    // 该异常发生 noexcept 析构中，@try 无法拦截，必然 SIGABRT
+    // （Aweme-2026-11-05 15:00 崩溃）。本地文件统一交给 FFmpeg 解码。
+    BXLog(@"[BXFloat][vcam] 本地视频走 FFmpeg: %@", path.lastPathComponent);
 
-    // ② AVFoundation 不支持（-11800 / -17508：容器或编码不认识）→ 退回 FFmpeg。
-    //    把本地路径当成"流地址"喂给现有 RTSP 管线，解码与音频都走我们自己的库。
-    BXLog(@"[BXFloat][vcam] AVFoundation 失败 → 改用 FFmpeg 解本地文件: %@", path.lastPathComponent);
+    self.rtsp.loopPlayback = YES;            // 本地文件默认循环
     NSError *ffErr = nil;
     if ([self.rtsp startWithURLString:path error:&ffErr]) {
-        BXLog(@"[BXFloat][vcam] 本地视频走 FFmpeg 成功");
+        BXLog(@"[BXFloat][vcam] 本地视频已载入（FFmpeg）");
         return YES;
     }
+    BXLog(@"[BXFloat][vcam] FFmpeg 打开失败: %@", ffErr.localizedDescription);
     if (error) *error = ffErr ?: [NSError errorWithDomain:@"BXVideo" code:-3
-                                                  userInfo:@{NSLocalizedDescriptionKey: @"AVFoundation 与 FFmpeg 都无法打开该文件"}];
+                                                  userInfo:@{NSLocalizedDescriptionKey: @"FFmpeg 无法打开该文件"}];
     return NO;
 }
 
+// 说明：本地视频的音轨也由 FFmpeg 解码后进音频环，不再走 AVAssetReader/BXLocalAudio。
+// BXLocalAudio 仅保留给"已通过校验"的兼容文件，当前不再调用。
 #pragma mark - 安装 hook（照原版 0x3258c4-0x325a18）
 
 // 原版把 5 个原始 IMP 存进固定槽位，钩子里直接 blr 调用，不做任何查表。
