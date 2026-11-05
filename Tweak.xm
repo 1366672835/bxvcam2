@@ -20,7 +20,8 @@ extern "C" void BXRegisterBuiltinModules(void);
 static void BXAttachIfNeeded(void);
 static void BXOnAppDidBecomeActive(id self, SEL _cmd, id app);
 
-BX_SWIZZLE(UIApplication, applicationDidBecomeActive:, BXOnAppDidBecomeActive)
+// 【已移除】不再 swizzle applicationDidBecomeActive：实测接管它会让"打开相机"整机卡死。
+// 改用 UIApplicationDidBecomeActiveNotification 监听（见构造函数），行为等价但不碰系统方法。
 
 #pragma mark - 挂载判定
 
@@ -41,7 +42,7 @@ static void BXAttachIfNeeded(void) {
     });
 }
 
-static void BXOnAppDidBecomeActive(id self, SEL _cmd, id app) {
+static void BXUnusedOnBecomeActive(id self, SEL _cmd, id app) {   // 保留签名避免其它引用报错，但不再被 hook 调用
     BXCallOrig(BXOnAppDidBecomeActive_orig, self, _cmd, app);
     BXAttachIfNeeded();
 }
@@ -79,11 +80,18 @@ static void BXFloatVCamInit(void) {
               dispatch_resume(t);
           }
 
-          // 【诊断 B23】B22 + applicationDidBecomeActive 的 swizzle
+          // 【正式做法】生命周期用通知监听：只补挂一次浮窗，不接管 App 的方法。
+          // 之前 swizzle applicationDidBecomeActive 会让「打开相机」整机卡死（B23 实测）。
           @try {
-              static dispatch_once_t once23;
-              dispatch_once(&once23, ^{ BXInstall_BXOnAppDidBecomeActive(); });
-          } @catch (NSException *e) { NSLog(@"[B23] swizzle 异常 %@", e); }
+              [[NSNotificationCenter defaultCenter]
+                  addObserverForName:UIApplicationDidBecomeActiveNotification
+                              object:nil
+                               queue:[NSOperationQueue mainQueue]
+                          usingBlock:^(NSNotification *note) {
+                  if (![BXFloatWindow shared].hidden) return;
+                  if (BXShouldAttach()) BXAttachIfNeeded();
+              }];
+          } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 通知监听异常 %@", e); }
           return;
 
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
