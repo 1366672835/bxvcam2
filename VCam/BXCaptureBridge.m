@@ -476,6 +476,7 @@ static BOOL gAutoStartDone = NO;
     // 现在拉流只在两处发生：面板手动连流、以及会话首个生效时的那一次自动开流。
 
 
+}
 + (instancetype)shared {
     static BXCaptureBridge *inst;
     static dispatch_once_t once;
