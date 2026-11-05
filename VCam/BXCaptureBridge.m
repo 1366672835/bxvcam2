@@ -537,6 +537,8 @@ static BOOL gAutoStartDone = NO;
     return ok;
 }
 
+- (BOOL)isStreaming { return self.rtsp.isRunning; }
+
 - (NSString *)rtspURL { return self.rtsp.urlString; }
 
 // 每秒重建一次快照：所有跨线程会变的值都在这里"拷一份"。
