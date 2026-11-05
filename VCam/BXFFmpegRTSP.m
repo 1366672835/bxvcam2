@@ -222,6 +222,7 @@ static int64_t gPaceBaseUs = 0;
 
 @implementation BXFFmpegRTSP {
     NSTimeInterval _bxSkipUntil;
+    CVPixelBufferRef _camLast;          // 摄像头路径上一次成功写出的帧（源帧率低于摄像头时复用，避免直通闪烁）
     CVPixelBufferPoolRef _camPool;      // 样本替换专用池（与预览池分开，避免互相释放）
     CGSize            _camPoolSize;
     OSType            _camPoolFmt;
@@ -1276,8 +1277,8 @@ static NSTimeInterval gLastDecodeTick = 0;
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
     if (!dst) return NO;
 
-    // 【拉模型】每次摄像头拍一次，只从队列里取走一帧——解一帧、写一帧，
-    // 生产者不会一直往前冲，从而消除"后台线程猛推 / 采集线程取"的跨线程争用。
+    // 拉模型 + 帧复用：每次采集取一帧；取不到就沿用上一次写出的帧。
+    // 源 24fps / 摄像头 30fps 时，多出来的那几次必须复用，否则会直通真实摄像头 → 一秒闪 6 次。
     CVPixelBufferRef src = NULL;
     [_lock lock];
     if (_qCount > 0) {
@@ -1285,13 +1286,19 @@ static NSTimeInterval gLastDecodeTick = 0;
         _qBuf[_qHead] = NULL;
         _qHead = (_qHead + 1) % 6;
         _qCount--;
-    } else if (_latest) {
-        src = (CVPixelBufferRef)CVBufferRetain(_latest);   // 队列空则重复上一帧，画面不黑
     }
+    if (!src && _camLast) src = (CVPixelBufferRef)CVBufferRetain(_camLast);
+    else if (!src && _latest) src = (CVPixelBufferRef)CVBufferRetain(_latest);
     [_lock unlock];
     if (!src) return NO;
 
     BOOL ok = [self transferFrom:src to:dst dedicated:YES];
+    if (ok) {
+        [_lock lock];
+        if (_camLast) CVPixelBufferRelease(_camLast);
+        _camLast = (CVPixelBufferRef)CVBufferRetain(src);
+        [_lock unlock];
+    }
     CVPixelBufferRelease(src);
     return ok;
 }
