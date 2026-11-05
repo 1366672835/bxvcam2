@@ -150,14 +150,6 @@ static void BXFloatVCamInit(void) {
             NSLog(@"[BXFloat][vcam] 音量键异常: %@", e);
         }
 
-        // 7. hook 生命周期
-        @try {
-            static dispatch_once_t once;
-            dispatch_once(&once, ^{ BXInstall_BXOnAppDidBecomeActive(); });
-        } @catch (NSException *e) {
-            NSLog(@"[BXFloat][vcam] hook 异常: %@", e);
-        }
-
         // 反复尝试挂载：某些场景（冷启动、切后台回来）第一秒拿不到 windowScene，
         // 只试一次就会「插件不见了」。这里持续重试，直到挂上为止。
         __block int tries = 0;
