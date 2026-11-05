@@ -1297,7 +1297,7 @@ static NSTimeInterval gLastDecodeTick = 0;
     CMTime pts = CMSampleBufferGetPresentationTimeStamp(orig);
     CMSampleBufferRef out = NULL;
     OSStatus st = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
-                                                          (__bridge CVImageBufferRef)dst,
+                                                          (CVImageBufferRef)dst,
                                                           fd, pts, &out);
     CVPixelBufferRelease(dst);
     if (st != noErr) return NULL;
