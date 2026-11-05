@@ -1296,13 +1296,15 @@ static NSTimeInterval gLastDecodeTick = 0;
 
     CMTime pts = CMSampleBufferGetPresentationTimeStamp(orig);
     CMSampleBufferRef out = NULL;
+    CMSampleTimingInfo timing = { kCMTimeInvalid, pts, kCMTimeInvalid };
     OSStatus st = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
                                                           (CVImageBufferRef)dst,
-                                                          fd, pts, &out);
-    CVPixelBufferRelease(dst);
-    if (st != noErr) return NULL;
+                                                          fd, &timing, &out);
+    CVPixelBufferRelease(dst);   // 样本已持有
     return out;
+    if (st != noErr || !out) return NULL;
 }
+
 
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
     [self releaseDueFrames];   // ★必须保留：_latest 只在 releaseDueFrames 里推进（我们用的是队列，不是原版的单槽）
