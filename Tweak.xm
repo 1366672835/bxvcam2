@@ -54,8 +54,14 @@ static void BXFloatVCamInit(void) {
           NSLog(@"[BXFloat][vcam] init bundle=%@",
                 [[NSBundle mainBundle] bundleIdentifier] ?: @"(null)");
 
-          // 【诊断 B19】完全惰性：不装钩子、不建浮窗、不注册模块、不接音量键。
-          // 目的：确认"一开相机就卡"是否由我们 dylib 的初始化动作造成。
+          // 【诊断 B20】只做 UI：注册模块 + 挂浮窗。
+          // 不装钩子、不接音量键、不启动重试定时器、不 hook 生命周期。
+          @try { BXRegisterBuiltinModules(); } @catch (NSException *e) { NSLog(@"B20 模块异常 %@", e); }
+          @try { [[BXFloatRegistry shared] restoreAll]; } @catch (NSException *e) { NSLog(@"B20 恢复异常 %@", e); }
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                         dispatch_get_main_queue(), ^{
+              [[BXFloatWindow shared] attach];
+          });
           return;
 
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
