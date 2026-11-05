@@ -1314,18 +1314,25 @@ static NSTimeInterval gLastDecodeTick = 0;
     if (!ok) { CVPixelBufferRelease(dst); return NULL; }
 
     CMTime pts = CMSampleBufferGetPresentationTimeStamp(orig);
-    CMSampleBufferRef out = NULL;
-    CMSampleTimingInfo timing = { kCMTimeInvalid, pts, kCMTimeInvalid };
-    OSStatus st = CMSampleBufferCreateReadyWithImageBuffer(kCFAllocatorDefault,
-                                                          (CVImageBufferRef)dst,
-                                                          fd, &timing, &out);
-    CVPixelBufferRelease(dst);   // 样本已持有
+    // 先核对我们造出来的缓冲属性（排查 InvalidMediaFormat 的关键）
     {
-        static int sOk = 0, sBad = 0;
-        if (st == noErr && out) { if (sOk++ < 3) BXLog(@"[BXRTSP] 造样本成功 %dx%d fmt=%08x 第%d次", (int)dim.width, (int)dim.height, (unsigned)fmt, sOk); }
-        else { if (sBad++ < 5) BXLog(@"[BXRTSP] 造样本失败 st=%d out=%p fd=%p %dx%d fmt=%08x", (int)st, out, fd, (int)dim.width, (int)dim.height, (unsigned)fmt); }
+        static int sChk = 0;
+        if (sChk++ < 2) BXLog(@"[BXRTSP] 造样本前：dst %zux%zu fmt=%08x / fd %dx%d fmt=%08x",
+                              CVPixelBufferGetWidth(dst), CVPixelBufferGetHeight(dst),
+                              (unsigned)CVPixelBufferGetPixelFormatType(dst),
+                              (int)dim.width, (int)dim.height, (unsigned)fmt);
     }
-    if (st != noErr || !out) return NULL;
+    CMSampleTimingInfo timing = { kCMTimeInvalid, pts, kCMTimeInvalid };
+    CMSampleBufferRef out = NULL;
+    OSStatus st = CMSampleBufferCreateForImageBuffer(kCFAllocatorDefault,
+                                                     (CVImageBufferRef)dst,
+                                                     true, &timing, fd, &out);
+    CVPixelBufferRelease(dst);
+    if (st != noErr || !out) {
+        static int sBad = 0;
+        if (sBad++ < 5) BXLog(@"[BXRTSP] CreateForImageBuffer 失败 st=%d", (int)st);
+        return NULL;
+    }
     return out;
 }
 
