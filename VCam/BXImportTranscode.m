@@ -18,7 +18,7 @@
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 
-#define BX_LOG(fmt, ...) BXLog(@"[BXFloat][import] " fmt, ##__VA_ARGS__)
+#define BX_LOG(fmt, ...) BXLogWrite(@"[BXFloat][import] " fmt, ##__VA_ARGS__)
 
 static const int kOutFPS = 30;
 static const int kMaxW   = 1080;
