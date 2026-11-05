@@ -35,6 +35,21 @@ jobs:
           echo "SDK=$PWD/$SDK" >> $GITHUB_ENV
           echo "using $SDK"
 
+      - name: Probe iOS toolchain
+        run: |
+          set -euo pipefail
+          printf 'int main(void){return 0;}\n' > /tmp/t.c
+          echo "--- 1) 编译（不链接）"
+          clang-18 --target=arm64-apple-ios14.0 -mios-version-min=14.0 -isysroot "$SDK" -c /tmp/t.c -o /tmp/t.o && echo OK-compile
+          echo "--- 2) 链接（ld64.lld）"
+          clang-18 --target=arm64-apple-ios14.0 -mios-version-min=14.0 -isysroot "$SDK" \
+            -fuse-ld=/usr/bin/ld64.lld-18 /tmp/t.o -o /tmp/t -Wl,-e,_main || {
+              echo "LINK FAILED"; /usr/bin/ld64.lld-18 --version; ls "$SDK/usr/lib" | head -20; exit 1; }
+          echo OK-link
+          echo "--- 3) 静态库链接测试"
+          echo 'int foo(void){return 1;}' > /tmp/a.c
+          clang-18 --target=arm64-apple-ios14.0 -isysroot "$SDK" -c /tmp/a.c -o /tmp/a.o
+          llvm-ar-18 rcs /tmp/liba.a /tmp/a.o && echo OK-ar
       - name: Cache FFmpeg
         id: cache-ff
         uses: actions/cache@v4
