@@ -1092,43 +1092,15 @@ static NSTimeInterval gWdogLastRestart;
                     }
                 }
 
-                if (!renderedDirect && self.rtsp.isRunning) {
-                    mine = [self.rtsp copyFrameForCameraPTS:camPTS scaledTo:target];
-                } else if (!renderedDirect) {
-                    [self.source prepareForCameraFormat:camFmt
-                                                  width:(size_t)target.width
-                                                 height:(size_t)target.height];
-                    mine = [self.source copyFrameForCameraPTS:camPTS scaledTo:target];
-                }
-
-                if (!renderedDirect && mine) {
-                    CVPixelBufferRef conv = NULL;
-                    CVPixelBufferRef use = mine;
-                    if (CVPixelBufferGetPixelFormatType(mine) != camFmt) {
-                        conv = BXConvertPixelBuffer(mine, camFmt);
-                        if (conv) use = conv;
-                        self.convCount += 1;
-                    }
-
-                    if (BXBlitInto(camPx, use)) {
-                        self.replacedFrames += 1;
-                        self.replaceFPS = [self tickReplace];
-                    } else {
-                        self.buildError = [NSString stringWithFormat:@"写入失败 %zux%zu fmt=%08x",
-                                           CVPixelBufferGetWidth(camPx),
-                                           CVPixelBufferGetHeight(camPx),
-                                           (unsigned)camFmt];
-                        self.passBlitFail += 1;
-                        self.passthroughFrames += 1;
-                    }
-
-                    if (conv) CVPixelBufferRelease(conv);
-                    CVPixelBufferRelease(mine);
-                } else if (!renderedDirect) {
-                    self.buildError = @"取帧为空";
+                // 【移除 CPU 兜底】VT 写不进去就直通，绝不去锁抖音的像素缓冲：
+                // BXBlitInto 需要 CVPixelBufferLockBaseAddress(camPx)，而录制/会话重建时
+                // 那块缓冲正被编码器持有 → 这把锁会无限等待 → 整机冻死（实测 2.5ms/帧正常，
+                // 一旦 VT 失败就掉进这条死路）。
+                if (!renderedDirect) {
                     self.passNoFrame += 1;
                     self.passthroughFrames += 1;
                 }
+
                 self.passWorkMs += (CACurrentMediaTime() - _tPass) * 1000.0;
             }
         } @catch (NSException *e) {
