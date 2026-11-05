@@ -1220,6 +1220,7 @@ static const BOOL kBXEnableHardwareDecode = NO;
 // 原版 0x330000 的 transfer 也是直接写目标缓冲，没有中间拷贝。
 // 原版预览路径 0x329b14：自建一块 BGRA，把槽位帧 VT 复制进去，再交给 CoreImage。
 - (CVPixelBufferRef)copyPreviewFrameBGRA CF_RETURNS_RETAINED {
+    [self releaseDueFrames];   // 预览也推进一次，避免相机未运行时永远取不到帧
     CVPixelBufferRef src = NULL;
     [_lock lock];
     if (_latest) src = (CVPixelBufferRef)CVBufferRetain(_latest);
@@ -1265,7 +1266,7 @@ static NSTimeInterval gLastDecodeTick = 0;
 
 
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
-    // 原版写帧入口（0x32ff78）没有"释放到期帧"这一步，这里也去掉，热路径更接近原版。
+    [self releaseDueFrames];   // ★必须保留：_latest 只在 releaseDueFrames 里推进（我们用的是队列，不是原版的单槽）
     if (!dst) return NO;
 
 
