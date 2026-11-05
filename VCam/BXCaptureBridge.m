@@ -542,10 +542,7 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 }
 
 - (BOOL)useRTSPURLString:(NSString *)urlString error:(NSError **)error {
-      // 音频注入默认开；配置里写 audio.inject = 0 可关掉（排查时用）
-      id auOff = [[BXFloatStore shared] objectForKey:@"audio.inject"];
-      BOOL skipAudio = [auOff isKindOfClass:[NSNumber class]] && ![auOff boolValue];
-      if (!skipAudio) BXAudioUnitHookInstall();
+    BXAudioUnitHookInstall();      // 拉流时才装音频钩子（启动时不碰内存）
     // 原版 0x330aa0 捕获的布尔就是 loop（见 0x33166c 的日志 "stream opened ... loop=%d"）
     id lp = [[BXFloatStore shared] objectForKey:@"rtsp.loop"];
     self.rtsp.loopPlayback = [lp isKindOfClass:[NSNumber class]] ? [lp boolValue] : YES;
@@ -744,13 +741,36 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 
 - (BOOL)useVideoAtPath:(NSString *)path error:(NSError **)error {
     if (!path.length) return NO;
-    // 音轨一起载入：否则本地视频只有画面、声音还是麦克风
+
+    // ① 先按 AVFoundation 载入（能硬解、省电）
     @try {
         [self.localAudio loadURL:[NSURL fileURLWithPath:path] error:NULL];
     } @catch (NSException *e) {
         BXLog(@"[BXFloat][vcam] 音轨载入异常 %@", e);
     }
-    return [self.source loadURL:[NSURL fileURLWithPath:path] error:error];
+    BOOL avOK = NO;
+    @try {
+        avOK = [self.source loadURL:[NSURL fileURLWithPath:path] error:error];
+    } @catch (NSException *e) {
+        BXLog(@"[BXFloat][vcam] 视频载入异常 %@", e);
+        avOK = NO;
+    }
+    if (avOK) {
+        BXLog(@"[BXFloat][vcam] 本地视频走 AVFoundation");
+        return YES;
+    }
+
+    // ② AVFoundation 不支持（-11800 / -17508：容器或编码不认识）→ 退回 FFmpeg。
+    //    把本地路径当成"流地址"喂给现有 RTSP 管线，解码与音频都走我们自己的库。
+    BXLog(@"[BXFloat][vcam] AVFoundation 失败 → 改用 FFmpeg 解本地文件: %@", path.lastPathComponent);
+    NSError *ffErr = nil;
+    if ([self.rtsp startWithURLString:path error:&ffErr]) {
+        BXLog(@"[BXFloat][vcam] 本地视频走 FFmpeg 成功");
+        return YES;
+    }
+    if (error) *error = ffErr ?: [NSError errorWithDomain:@"BXVideo" code:-3
+                                                  userInfo:@{NSLocalizedDescriptionKey: @"AVFoundation 与 FFmpeg 都无法打开该文件"}];
+    return NO;
 }
 
 #pragma mark - 安装 hook（照原版 0x3258c4-0x325a18）
