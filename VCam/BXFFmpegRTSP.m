@@ -223,6 +223,8 @@ static int64_t gPaceBaseUs = 0;
 @implementation BXFFmpegRTSP {
     NSTimeInterval _bxSkipUntil;
     CVPixelBufferRef _camLast;          // 摄像头路径上一次成功写出的帧（源帧率低于摄像头时复用，避免直通闪烁）
+    CVPixelBufferRef _slot;             // 单槽：最新解出的帧（对应原版 0x4a80d8）
+    double            _slotPts;
     CVPixelBufferPoolRef _camPool;      // 样本替换专用池（与预览池分开，避免互相释放）
     CGSize            _camPoolSize;
     OSType            _camPoolFmt;
@@ -787,6 +789,8 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
         if (_sws) { sws_freeContext(_sws); _sws = NULL; }
         if (_bgra) { free(_bgra); _bgra = NULL; _bgraSize = 0; }
         if (_latest) { CVPixelBufferRelease(_latest); _latest = NULL; }
+    if (_slot)   { CVPixelBufferRelease(_slot);   _slot = NULL; }
+    if (_camLast){ CVPixelBufferRelease(_camLast); _camLast = NULL; }
         if (_lastServed) { CVPixelBufferRelease(_lastServed); _lastServed = NULL; }
         if (_pool) { CVPixelBufferPoolRelease(_pool); _pool = NULL; }
         [_lock unlock];
@@ -976,23 +980,12 @@ static const BOOL kBXEnableHardwareDecode = NO;
     if (!buf) return;
     CVPixelBufferRef keep = (CVPixelBufferRef)CVBufferRetain(buf);
 
+    // 【单槽】照原版 0x4a80d8：只有一个槽位，新帧直接覆盖旧帧。
+    // 不排队、不追帧、不做 fps 匹配——原版就是这样，也因此没有跨线程积压。
     [_lock lock];
-    if (!_qStarted) {
-        _qStarted = 1;
-        _qBasePts = pts;
-        _qBaseHost = av_gettime_relative();
-    }
-    if (_qCount >= 6) {                 // 满了丢最旧的，避免无限增长
-        CVPixelBufferRef old = _qBuf[_qHead];
-        _qHead = (_qHead + 1) % 6;
-        _qCount--;
-        _qDrops++;
-        if (old) CVPixelBufferRelease(old);
-    }
-    int tail = (_qHead + _qCount) % 6;
-    _qBuf[tail] = keep;
-    _qPts[tail] = pts;
-    _qCount++;
+    if (_slot) CVPixelBufferRelease(_slot);
+    _slot = keep;
+    _slotPts = pts;
     [_lock unlock];
 }
 
@@ -1224,10 +1217,10 @@ static const BOOL kBXEnableHardwareDecode = NO;
 // 原版 0x330000 的 transfer 也是直接写目标缓冲，没有中间拷贝。
 // 原版预览路径 0x329b14：自建一块 BGRA，把槽位帧 VT 复制进去，再交给 CoreImage。
 - (CVPixelBufferRef)copyPreviewFrameBGRA CF_RETURNS_RETAINED {
-    [self releaseDueFrames];   // 预览也推进一次，避免相机未运行时永远取不到帧
+    // 单槽：预览直接读槽位
     CVPixelBufferRef src = NULL;
     [_lock lock];
-    if (_latest) src = (CVPixelBufferRef)CVBufferRetain(_latest);
+    if (_slot) src = (CVPixelBufferRef)CVBufferRetain(_slot);
     [_lock unlock];
     if (!src) return NULL;
 
@@ -1277,28 +1270,15 @@ static NSTimeInterval gLastDecodeTick = 0;
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
     if (!dst) return NO;
 
-    // 拉模型 + 帧复用：每次采集取一帧；取不到就沿用上一次写出的帧。
-    // 源 24fps / 摄像头 30fps 时，多出来的那几次必须复用，否则会直通真实摄像头 → 一秒闪 6 次。
+    // 原版 0x32ff78：锁A 取槽位帧 + retain → 解锁A → 锁B + VT 搬运 → 解锁B。
+    // 单槽没有"队列空了要复用上一帧"的问题：槽里的帧一直在，直到被新帧覆盖。
     CVPixelBufferRef src = NULL;
     [_lock lock];
-    if (_qCount > 0) {
-        src = _qBuf[_qHead];
-        _qBuf[_qHead] = NULL;
-        _qHead = (_qHead + 1) % 6;
-        _qCount--;
-    }
-    if (!src && _camLast) src = (CVPixelBufferRef)CVBufferRetain(_camLast);
-    else if (!src && _latest) src = (CVPixelBufferRef)CVBufferRetain(_latest);
+    if (_slot) src = (CVPixelBufferRef)CVBufferRetain(_slot);
     [_lock unlock];
     if (!src) return NO;
 
     BOOL ok = [self transferFrom:src to:dst dedicated:YES];
-    if (ok) {
-        [_lock lock];
-        if (_camLast) CVPixelBufferRelease(_camLast);
-        _camLast = (CVPixelBufferRef)CVBufferRetain(src);
-        [_lock unlock];
-    }
     CVPixelBufferRelease(src);
     return ok;
 }
@@ -1318,8 +1298,8 @@ static NSTimeInterval gLastDecodeTick = 0;
     //   x20 = [0x4a80d8]; CVPixelBufferRetain(x20); unlock
     // 槽位由生产者覆盖（覆盖时释放旧的）。
     // 这样每个摄像头 tick 都能拿到最新帧（重复上一帧），不会出现空槽回落摄像头。
-    if (_latest) {
-        f = CVPixelBufferRetain(_latest);
+    if (_slot) {
+        f = (CVPixelBufferRef)CVBufferRetain(_slot);
     }
 
     [_lock unlock];
@@ -1695,6 +1675,8 @@ static NSTimeInterval gLastDecodeTick = 0;
     if (_sws) { sws_freeContext(_sws); _sws = NULL; }
     if (_bgra) { free(_bgra); _bgra = NULL; _bgraSize = 0; }
     if (_latest) { CVPixelBufferRelease(_latest); _latest = NULL; }
+    if (_slot)   { CVPixelBufferRelease(_slot);   _slot = NULL; }
+    if (_camLast){ CVPixelBufferRelease(_camLast); _camLast = NULL; }
     if (_pool) { CVPixelBufferPoolRelease(_pool); _pool = NULL; }
     [_lock unlock];
 
