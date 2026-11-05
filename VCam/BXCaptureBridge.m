@@ -446,9 +446,6 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 static BOOL gAutoStartDone = NO;
 
 
-#ifdef __cplusplus
-extern "C"
-
 @implementation BXCaptureBridge
 
 + (void)load { }
