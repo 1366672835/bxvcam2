@@ -52,6 +52,11 @@ __attribute__((constructor))
 static void BXFloatVCamInit(void) {
     @autoreleasepool {
         NSLog(@"[BXFloat][vcam] init bundle=%@",
+
+          // 【诊断 B19】完全惰性：不装钩子、不建浮窗、不注册模块、不接音量键。
+          // 目的：确认"一开相机就卡"是不是我们 dylib 的初始化动作造成的。
+          // 若这样还卡，就与初始化无关（可能是注入方式/系统层面）。
+          return;
               [[NSBundle mainBundle] bundleIdentifier] ?: @"(null)");
 
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
