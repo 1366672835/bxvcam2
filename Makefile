@@ -1,4 +1,4 @@
-#
+﻿#
 # BXFloat VCam — 虚拟摄像头（TrollStore / 裸 dylib）
 #
 
@@ -21,6 +21,7 @@ BXFloatVCam_FILES = Tweak.xm \
                     VCam/BXVideoSource.m \
                     VCam/BXFFmpegRTSP.m \
                     VCam/BXLocalAudio.m \
+                    VCam/BXImportTranscode.m \
                     VCam/BXCaptureBridge.m \
                     VCam/BXAudioUnitHook.m \
                     VCam/BXFishhook.c \

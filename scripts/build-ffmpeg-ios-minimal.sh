@@ -39,6 +39,9 @@ for ARCH in $ARCHS; do
     --disable-shared --enable-static \
     --enable-network --enable-pic \
     --disable-everything \
+    --enable-encoder=h264_videotoolbox,aac,mpeg4 \
+    --enable-muxer=mp4,mov \
+    --enable-videotoolbox \
     --enable-avformat --enable-avcodec --enable-swscale --enable-swresample \
     --enable-protocol=file,rtsp,rtp,tcp,udp,rtmp,rtmps,http,https \
     --enable-demuxer=rtsp,rtp,flv,mov,mp4,m4v,mpegts,h264,hevc,aac,mp3,wav \

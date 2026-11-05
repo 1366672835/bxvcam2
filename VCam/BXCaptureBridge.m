@@ -9,7 +9,7 @@
 #import "BXColorSpace.h"
 #import "BXVideoSource.h"
 #import "BXFFmpegRTSP.h"
-#import "BXLocalAudio.h"
+#import "BXLocalAudio.h"`n`n// 导入转码（BXImportTranscode.m）`nextern NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir);
 #import "BXPreviewWindow.h"   // 后台停流时判断预览是否开着
 #import "BXFloatStore.h"
 #import <UIKit/UIKit.h>        // UIApplication 前后台通知
@@ -742,15 +742,25 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 - (BOOL)useVideoAtPath:(NSString *)path error:(NSError **)error {
     if (!path.length) return NO;
 
-    // 不再使用 AVAssetReader：+[AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:outputSettings:]
-    // 在部分文件上会在 dealloc 里抛 ObjC 异常（__cxa_throw → failed_throw → terminate），
-    // 该异常发生 noexcept 析构中，@try 无法拦截，必然 SIGABRT
-    // （Aweme-2026-11-05 15:00 崩溃）。本地文件统一交给 FFmpeg 解码。
-    BXLog(@"[BXFloat][vcam] 本地视频走 FFmpeg: %@", path.lastPathComponent);
+    // ① 先按原版做法「导入时压缩」：转成标准 mp4（H.264 VT 硬编 + AAC，固定 30fps CFR）
+    //    这样播放端只面对一种格式，音画同步/卡顿问题从源头消掉。
+    NSString *playPath = path;
+    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"bximport"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                             withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *std = BXTranscodeToStandardMP4(path, dir);
+    if (std.length) {
+        playPath = std;
+        BXLog(@"[BXFloat][vcam] 导入压缩完成 → %@", std.lastPathComponent);
+    } else {
+        BXLog(@"[BXFloat][vcam] 导入压缩失败，改直接播放原文件");
+    }
+
+    BXLog(@"[BXFloat][vcam] 本地视频走 FFmpeg: %@", playPath.lastPathComponent);
 
     self.rtsp.loopPlayback = YES;            // 本地文件默认循环
     NSError *ffErr = nil;
-    if ([self.rtsp startWithURLString:path error:&ffErr]) {
+    if ([self.rtsp startWithURLString:playPath error:&ffErr]) {
         BXLog(@"[BXFloat][vcam] 本地视频已载入（FFmpeg）");
         return YES;
     }
