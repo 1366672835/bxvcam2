@@ -443,6 +443,10 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 // 原版 0x4a836c：「首个会话生效」闩锁，自动开流只做一次。
 static BOOL gAutoStartDone = NO;
 
+// 录制开始/结束会让抖音 stop→start 重建采集会话。这两个时刻我们完全停止写帧：
+// VTPixelTransferSessionTransferImage 是同步等 GPU 的，与它的编码器互等就会整机卡死。
+static NSTimeInterval gBXNoWriteUntil = 0;
+
 @implementation BXCaptureBridge
 
 + (void)load { }
@@ -848,6 +852,7 @@ static void BXAddOutput(id self, SEL _cmd, id output) {
 //            → 也就是「会话一启动就自动开始拉流」
 static void BXSessionStart(id self, SEL _cmd) {
     BXLog(@"[BXFloat][vcam] capture session start running=%@", NSStringFromClass([self class]));
+    gBXNoWriteUntil = CACurrentMediaTime() + 3.0;   // 缓冲启动期：让开 3 秒
     if (gOrigStartRunning) ((void (*)(id, SEL))gOrigStartRunning)(self, _cmd);
     // 【纯透传】原版这两个钩子只"打日志 + 调原实现"，不碰采集会话。
     // 之前我们在这里做探针/刷面板/自动开流，录制会 stop→start 重建会话，
@@ -859,6 +864,7 @@ static void BXSessionStart(id self, SEL _cmd) {
 // 原版 0x32a9cc：日志 → 原实现 → 0x330bd4（与 0x330a04 同形）
 static void BXSessionStop(id self, SEL _cmd) {
     BXLog(@"[BXFloat][vcam] capture session stop running=%@", NSStringFromClass([self class]));
+    gBXNoWriteUntil = CACurrentMediaTime() + 3.0;   // 会话拆除期：让开 3 秒
     if (gOrigStopRunning) ((void (*)(id, SEL))gOrigStopRunning)(self, _cmd);
     // 【纯透传】同上：录制结束时的 stop 不再附带刷面板等主线程工作。
 }
@@ -976,8 +982,11 @@ static NSTimeInterval gWdogLastRestart;
 
     gOrigVideoSetter  = method_setImplementation(mVideo, (IMP)BXVideoSetSampleBufferDelegate);
     gOrigAudioSetter  = method_setImplementation(mAudio, (IMP)BXAudioSetSampleBufferDelegate);
-    // 【精简】不再 hook addOutput / startRunning / stopRunning：
-    // 它们对功能没贡献，却会在录制重建会话时干扰抖音状态机（实测一进相机就卡）。
+    // addOutput 不装（没用途）。start/stop 只用于「感知会话重建」，
+    // 在那一刻暂停写帧，避免与录制编码器互等（这才是录制卡死的真正原因）。
+    gOrigStartRunning = method_setImplementation(mStart, (IMP)BXSessionStart);
+    gOrigStopRunning  = method_setImplementation(mStop,  (IMP)BXSessionStop);
+    (void)mAdd;
 
 
     self.hookedCount = 2;   // 只装了两个 setSampleBufferDelegate
@@ -1064,6 +1073,11 @@ static NSTimeInterval gWdogLastRestart;
                     // 原版 0x330088：VT 直接把槽位帧写进摄像头缓冲（GPU→GPU），
                     // 不锁 CPU 内存、不做 memcpy。锁 IOSurface 会强制等 GPU 同步，
                     // 每帧几十毫秒，抖音就会丢帧。
+                      // 会话重建窗口期（录制开始/结束各 3 秒内）完全不写帧：
+                      // 那段正是抖音编码器在抢同一块像素缓冲的时候，硬写必然互等。
+                      if (CACurrentMediaTime() < gBXNoWriteUntil) {
+                          self.passthroughFrames += 1;
+                      } else
                     renderedDirect = [self.rtsp renderLatestInto:camPx];
                     if (renderedDirect) {
                         self.replacedFrames += 1;
