@@ -63,16 +63,6 @@ static void BXFloatVCamInit(void) {
               [[BXFloatWindow shared] attach];
           });
 
-          // 【诊断 B21】B20 + 音量键监听（AVAudioSession 相关，最可能与相机抢音频会话）
-          @try {
-              [[BXVolumeShortcut shared] startWithHandler:^(BOOL isVolumeUp, NSInteger taps) {
-                  dispatch_async(dispatch_get_main_queue(), ^{
-                      if (!isVolumeUp) return;
-                      BXFloatWindow *w = [BXFloatWindow shared];
-                      if (w.hidden) [w attach];
-                  });
-              }];
-          } @catch (NSException *e) { NSLog(@"[B21] 音量键异常 %@", e); }
 
           // 【诊断 B22】B21 + 1.5 秒重试定时器（每 1.5s 调一次 attach，共 40 次）
           {

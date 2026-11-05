@@ -17,7 +17,6 @@ BXFloatVCam_FILES = Tweak.xm \
                     BXCore/BXPreviewWindow.m \
                     BXCore/BXFloatModule.m \
                     BXCore/BXFloatStore.m \
-                    BXCore/BXVolumeShortcut.m \
                     VCam/BXVideoSource.m \
                     VCam/BXFFmpegRTSP.m \
                     VCam/BXLocalAudio.m \
