@@ -1551,24 +1551,29 @@ static NSTimeInterval gLastDecodeTick = 0;
     [_lock lock];
     if (_aRing) {
         size_t need = (size_t)got;
-        if (need > _aRingFrames) need = _aRingFrames;
-        // 【原版机制】环形写入，不做 memmove；落后的是"消费者"，不是缓冲区。
-        const float *src = _aTmp + (got - (int)need) * ch;
-        for (size_t k = 0; k < need; k++) {
-            size_t pos = (size_t)((_aWriteIdx + k) % _aRingFrames);
-            memcpy(_aRing + pos * ch, src + k * ch, (size_t)ch * sizeof(float));
+        if (need >= _aRingFrames) need = _aRingFrames;
+        if (_aFillFrames + need > _aRingFrames) {
+            size_t drop = _aFillFrames + need - _aRingFrames;
+            if (drop > _aFillFrames) drop = _aFillFrames;
+            memmove(_aRing, _aRing + drop * ch, (_aFillFrames - drop) * ch * sizeof(float));
+            _aFillFrames -= drop;
         }
-        _aWriteIdx += need;
-        // 消费者落后超过整个缓冲：把它的读指针推到"最老的有效帧"（原版正是推进落后段），
-        // 而不是丢弃刚刚写入的新数据。损失计入欠载统计。
-        if (_aReadIdx + _aRingFrames <= _aWriteIdx) {
-            uint64_t lost = _aWriteIdx - _aRingFrames - _aReadIdx;
-            _aReadIdx = _aWriteIdx - _aRingFrames;
-            _aDropped += lost;
-            _audioUnderruns++;
-            _audioUnderrunFrames += (NSUInteger)lost;
+        memcpy(_aRing + _aFillFrames * ch, _aTmp + (got - (int)need) * ch,
+               need * ch * sizeof(float));
+        _aFillFrames += need;
+        // 延迟上限（B52 版本，听感更好）：缓冲最多保留 ~150ms 音频
+        {
+            double ar = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
+            size_t capFrames = (size_t)(ar * 0.15);
+            if (capFrames < 1024) capFrames = 1024;
+            if (_aFillFrames > capFrames) {
+                size_t d2 = _aFillFrames - capFrames;
+                if (d2 > 0 && d2 < _aFillFrames) {
+                    memmove(_aRing, _aRing + d2 * ch, (_aFillFrames - d2) * ch * sizeof(float));
+                    _aFillFrames -= d2;
+                }
+            }
         }
-        _aFillFrames = (size_t)(_aWriteIdx - _aReadIdx);
     }
     [_lock unlock];
 }
@@ -1580,15 +1585,14 @@ static NSTimeInterval gLastDecodeTick = 0;
     if (ch > 2) ch = 2;
     NSUInteger n = 0;
     [_lock lock];
-    if (_aRing) {
-        uint64_t avail = (_aWriteIdx > _aReadIdx) ? (_aWriteIdx - _aReadIdx) : 0;
-        n = (NSUInteger)MIN((uint64_t)maxFrames, avail);
-        for (NSUInteger k = 0; k < n; k++) {
-            size_t pos = (size_t)((_aReadIdx + k) % _aRingFrames);
-            memcpy(dst + k * ch, _aRing + pos * ch, (size_t)ch * sizeof(float));
+    if (_aRing && _aFillFrames > 0) {
+        n = MIN(maxFrames, _aFillFrames);
+        NSUInteger total = n * ch;
+        memcpy(dst, _aRing, total * sizeof(float));
+        if (n < _aFillFrames) {
+            memmove(_aRing, _aRing + n * ch, (_aFillFrames - n) * ch * sizeof(float));
         }
-        _aReadIdx += n;
-        _aFillFrames = (size_t)(_aWriteIdx - _aReadIdx);
+        _aFillFrames -= n;
     }
     if (n < maxFrames) {
         _audioUnderruns++;
@@ -1596,6 +1600,7 @@ static NSTimeInterval gLastDecodeTick = 0;
     }
     [_lock unlock];
     return n;
+}
 }
 
 - (NSUInteger)copyAudioS16:(int16_t *)dst maxFrames:(NSUInteger)maxFrames {
@@ -1605,20 +1610,17 @@ static NSTimeInterval gLastDecodeTick = 0;
     if (ch > 2) ch = 2;
     NSUInteger n = 0;
     [_lock lock];
-    if (_aRing) {
-        uint64_t avail = (_aWriteIdx > _aReadIdx) ? (_aWriteIdx - _aReadIdx) : 0;
-        n = (NSUInteger)MIN((uint64_t)maxFrames, avail);
-        for (NSUInteger k = 0; k < n; k++) {
-            size_t pos = (size_t)((_aReadIdx + k) % _aRingFrames);
-            const float *s = _aRing + pos * ch;
-            for (int c = 0; c < ch; c++) {
-                float v = s[c];
-                if (v > 1.0f) v = 1.0f; else if (v < -1.0f) v = -1.0f;
-                dst[k * ch + c] = (int16_t)(v * 32767.0f);
-            }
+    if (_aRing && _aFillFrames > 0) {
+        n = MIN(maxFrames, _aFillFrames);
+        for (NSUInteger k = 0; k < n * ch; k++) {
+            float v = _aRing[k];
+            if (v > 1.0f) v = 1.0f; else if (v < -1.0f) v = -1.0f;
+            dst[k] = (int16_t)(v * 32767.0f);
         }
-        _aReadIdx += n;
-        _aFillFrames = (size_t)(_aWriteIdx - _aReadIdx);
+        if (n < _aFillFrames) {
+            memmove(_aRing, _aRing + n * ch, (_aFillFrames - n) * ch * sizeof(float));
+        }
+        _aFillFrames -= n;
     }
     if (n < maxFrames) {
         _audioUnderruns++;
@@ -1626,6 +1628,7 @@ static NSTimeInterval gLastDecodeTick = 0;
     }
     [_lock unlock];
     return n;
+}
 }
 
 #pragma mark - 重连 / 停止
