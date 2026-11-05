@@ -51,33 +51,6 @@ static void BXFloatVCamInit(void) {
           NSLog(@"[BXFloat][vcam] init bundle=%@",
                 [[NSBundle mainBundle] bundleIdentifier] ?: @"(null)");
 
-          // 【诊断 B20】只做 UI：注册模块 + 挂浮窗。
-          // 不装钩子、不接音量键、不启动重试定时器、不 hook 生命周期。
-          @try { BXRegisterBuiltinModules(); } @catch (NSException *e) { NSLog(@"B20 模块异常 %@", e); }
-          @try { [[BXFloatRegistry shared] restoreAll]; } @catch (NSException *e) { NSLog(@"B20 恢复异常 %@", e); }
-          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
-                         dispatch_get_main_queue(), ^{
-              [[BXFloatWindow shared] attach];
-          });
-
-
-          // 【诊断 B22】B21 + 1.5 秒重试定时器（每 1.5s 调一次 attach，共 40 次）
-          {
-              __block int tries = 0;
-              dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                                                          dispatch_get_main_queue());
-              dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 0),
-                                        (uint64_t)(1.5 * NSEC_PER_SEC), 0);
-              dispatch_source_set_event_handler(t, ^{
-                  tries++;
-                  [[BXFloatWindow shared] attach];
-                  if (tries >= 40) dispatch_source_cancel(t);
-              });
-              dispatch_resume(t);
-          }
-
-          return;
-
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
         @try {
             [[BXCaptureBridge shared] install];
