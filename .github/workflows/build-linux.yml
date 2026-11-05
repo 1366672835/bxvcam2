@@ -55,8 +55,10 @@ jobs:
         id: cache-ff
         uses: actions/cache@v4
         with:
-          path: vendor/ffmpeg-ios
-          key: ffmpeg-linux-arm64-v1
+          path: |
+            vendor/ff-build-arm64/out
+            vendor/ff-build-arm64e/out
+          key: ffmpeg-linux-perarch-v2
 
       - name: Build FFmpeg (arm64 + arm64e, minimal, static)
         if: steps.cache-ff.outputs.cache-hit != 'true'
@@ -91,21 +93,13 @@ jobs:
             make install
             cd "$GITHUB_WORKSPACE"
           done
-          mkdir -p vendor/ffmpeg-ios/lib vendor/ffmpeg-ios/include
-          cp -R vendor/ff-build-arm64/out/include/. vendor/ffmpeg-ios/include/
-          for lib in vendor/ff-build-arm64/out/lib/*.a; do
-            b=$(basename "$lib")
-            llvm-lipo-18 -create vendor/ff-build-arm64/out/lib/$b vendor/ff-build-arm64e/out/lib/$b \
-              -output vendor/ffmpeg-ios/lib/$b
-          done
-          ls -lh vendor/ffmpeg-ios/lib
+          ls -lh vendor/ff-build-arm64/out/lib | head -8
+          ls -lh vendor/ff-build-arm64e/out/lib | head -8
 
       - name: Compile + link (both archs)
         run: |
           set -euo pipefail
-          # lipo 出来的静态库需要补符号索引，否则 ld64.lld 报 archive has no index
-          for lib in vendor/ffmpeg-ios/lib/*.a; do llvm-ranlib-18 "$lib"; done
-          INC="-IBXCore -IVCam -Ivendor/ffmpeg-ios/include"
+          INC="-IBXCore -IVCam -Ivendor/ff-build-arm64/out/include"
           FLAGS="-fobjc-arc -O2 -fPIC -Wno-everything -DNDEBUG"
           FRAMEWORKS="-framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore \
                       -framework CoreImage -framework AVFoundation -framework CoreMedia -framework CoreVideo \
@@ -132,7 +126,7 @@ jobs:
               -Wl,-arch,$ARCH -Wl,-platform_version,ios,14.0,16.5 \
               -Wl,-x -install_name @executable_path/BXFloatVCam.dylib \
               build/objs/$ARCH/*.o \
-              -Lvendor/ffmpeg-ios/lib -lavformat -lavcodec -lswresample -lswscale -lavutil \
+              -Lvendor/ff-build-$ARCH/out/lib -lavformat -lavcodec -lswresample -lswscale -lavutil \
               $FRAMEWORKS \
               -o build/BXFloatVCam-$ARCH.dylib
           done
