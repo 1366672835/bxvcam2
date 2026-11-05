@@ -69,30 +69,42 @@ static void BXProcessDelegate(id delegate) {
     BXLog(@"[BXFloat][vcam] hook delegate 类 %@ prev=%p", name, (void *)prev);
 }
 
-static void BXDelegateCapture(id self, SEL _cmd, id output,
-                              CMSampleBufferRef sbuf, id connection) {
-    // 照原版：先处理好缓冲，再按「类名」查回原实现转发。
-    CMSampleBufferRef rep = [[BXCaptureBridge shared] processBuffer:sbuf output:output];
-
-    IMP orig = nil;
-    NSString *name = NSStringFromClass([self class]);
-    @synchronized ([BXCaptureBridge class]) {
-        NSValue *v = gDelegatePrev ? gDelegatePrev[name] : nil;
-        if (v) orig = (IMP)v.pointerValue;
-    }
-    if (!orig) {
-        // 兜底：直接从方法表取（此时已是我们的实现，取不到就跳过转发）
-        Method m = class_getInstanceMethod([self class], _cmd);
-        if (m) {
-            IMP cur = method_getImplementation(m);
-            if (cur != (IMP)BXDelegateCapture) orig = cur;
+// 沿父类链找"真正的原实现"：绝不返回我们自己的函数，避免无限递归把主线程锁死。
+static IMP BXOrigDelegateIMP(id obj) {
+    if (!obj) return NULL;
+    for (Class c = object_getClass(obj); c; c = class_getSuperclass(c)) {
+        NSString *n = NSStringFromClass(c);
+        if (!n) continue;
+        @synchronized ([BXCaptureBridge class]) {
+            NSValue *v = gDelegatePrev[n];
+            if (v) {
+                IMP imp = (IMP)[v pointerValue];
+                if (imp && imp != (IMP)BXDelegateCapture) return imp;
+            }
         }
     }
-    if (orig) {
-        ((void (*)(id, SEL, id, CMSampleBufferRef, id))orig)(self, _cmd, output,
-                                                             rep ? rep : sbuf, connection);
+    return NULL;
+}
+
+static void BXDelegateCapture(id self, SEL _cmd, id output,
+                              CMSampleBufferRef sbuf, id connection) {
+    // 递归保护：同一线程内再次进入说明转发链成环，直接原样返回，绝不递归。
+    static __thread int depth = 0;
+    if (depth > 0) return;
+    depth++;
+
+    CMSampleBufferRef rep = sbuf;
+    @try {
+        rep = [[BXCaptureBridge shared] processBuffer:sbuf output:output];
+    } @catch (NSException *e) {
+        rep = sbuf;
     }
-    if (rep) CFRelease(rep);
+
+    IMP prev = BXOrigDelegateIMP(self);
+    if (prev) {
+        ((void (*)(id, SEL, id, CMSampleBufferRef, id))prev)(self, _cmd, output, rep ?: sbuf, connection);
+    }
+    depth--;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -964,12 +976,11 @@ static NSTimeInterval gWdogLastRestart;
 
     gOrigVideoSetter  = method_setImplementation(mVideo, (IMP)BXVideoSetSampleBufferDelegate);
     gOrigAudioSetter  = method_setImplementation(mAudio, (IMP)BXAudioSetSampleBufferDelegate);
-    gOrigAddOutput    = method_setImplementation(mAdd,   (IMP)BXAddOutput);
-    gOrigStartRunning = method_setImplementation(mStart, (IMP)BXSessionStart);
-    gOrigStopRunning  = method_setImplementation(mStop,  (IMP)BXSessionStop);
+    // 【精简】不再 hook addOutput / startRunning / stopRunning：
+    // 它们对功能没贡献，却会在录制重建会话时干扰抖音状态机（实测一进相机就卡）。
 
 
-    self.hookedCount = 5;
+    self.hookedCount = 2;   // 只装了两个 setSampleBufferDelegate
     self.installed = YES;
     BXLog(@"[BXFloat][vcam] capture probe installed video_delegate audio_delegate "
           "session_output session_start_stop audio_backend=avcapture_delegate");
