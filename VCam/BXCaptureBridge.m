@@ -860,23 +860,36 @@ static void BXAddOutput(id self, SEL _cmd, id output) {
 //                把 {字符串, 控制器, 标志} 装进栈 block 异步执行
 //            → 也就是「会话一启动就自动开始拉流」
 static void BXSessionStart(id self, SEL _cmd) {
-    BXLog(@"[BXFloat][vcam] capture session start running=%@", NSStringFromClass([self class]));
-    gBXNoWriteUntil = CACurrentMediaTime() + 3.0;   // 缓冲启动期：让开 3 秒
+    // 【零日志】这两个钩子不在任何路径上写日志/写盘：
+    // BXLog 内部走全局锁，录制重建会话时若与写盘线程互等，就是整机卡死。
     if (gOrigStartRunning) ((void (*)(id, SEL))gOrigStartRunning)(self, _cmd);
-    // 【纯透传】原版这两个钩子只"打日志 + 调原实现"，不碰采集会话。
-    // 之前我们在这里做探针/刷面板/自动开流，录制会 stop→start 重建会话，
-    // 这些活跟抖音的录制启动抢主线程，表现就是「录制时整机卡住点不了」。
-    // 现在一律不做，交给面板层自己去刷新。
+
+    // 原版 0x330aa0「首个会话生效」：闩锁只做一次，之后即使会话反复重建也不再开流。
+    if (!gAutoStartDone) {
+        gAutoStartDone = YES;
+        BXCaptureBridge *br = [BXCaptureBridge shared];
+        BXFloatStore *st = [BXFloatStore shared];
+        NSString *url = [st objectForKey:@"rtsp_url"];
+        NSNumber *en  = [st objectForKey:@"rtsp.enabled"];
+        BOOL want = en ? en.boolValue : YES;
+        if (want && [url isKindOfClass:[NSString class]] && url.length && !br.rtsp.isRunning) {
+            NSString *u = [url copy];
+            // 延后 1.5s：会话刚 start 时相机还在起来，立刻开流会抢资源（实测帧率掉到 0）。
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                [br useRTSPURLString:u error:nil];
+            });
+        }
+    }
+}
+
+static void BXSessionStop(id self, SEL _cmd) {
+    // 【零日志】同上，什么都不做，只调原实现。
+    if (gOrigStopRunning) ((void (*)(id, SEL))gOrigStopRunning)(self, _cmd);
 }
 
 // 原版 0x32a9d4
 // 原版 0x32a9cc：日志 → 原实现 → 0x330bd4（与 0x330a04 同形）
-static void BXSessionStop(id self, SEL _cmd) {
-    BXLog(@"[BXFloat][vcam] capture session stop running=%@", NSStringFromClass([self class]));
-    gBXNoWriteUntil = CACurrentMediaTime() + 3.0;   // 会话拆除期：让开 3 秒
-    if (gOrigStopRunning) ((void (*)(id, SEL))gOrigStopRunning)(self, _cmd);
-    // 【纯透传】同上：录制结束时的 stop 不再附带刷面板等主线程工作。
-}
 
 
 // 一次性迁移：旧键（bx.* 前缀）→ 原版键名。用户已存的地址/开关不会丢。
