@@ -98,6 +98,7 @@ NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir) {
                       [[NSUUID UUID].UUIDString substringToIndex:8]];
     NSString *outPath = [outDir stringByAppendingPathComponent:name];
 
+    BOOL ok = YES;
     AVFormatContext *oc = NULL;
     if (avformat_alloc_output_context2(&oc, NULL, "mp4", outPath.UTF8String) < 0 || !oc) {
         BX_LOG(@"创建输出容器失败");
@@ -171,11 +172,13 @@ NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir) {
         }
     }
 
-    if (avio_open(&oc->pb, outPath.UTF8String, AVIO_FLAG_WRITE) < 0) {
+    int aio = avio_open(&oc->pb, outPath.UTF8String, AVIO_FLAG_WRITE);
+    if (aio < 0) { BX_LOG(@"avio_open 失败 %d", aio);
         BX_LOG(@"打开输出文件失败");
         goto fail;
     }
-    if (avformat_write_header(oc, NULL) < 0) {
+    int wh = avformat_write_header(oc, NULL);
+    if (wh < 0) { BX_LOG(@"write_header 失败 %d", wh);
         BX_LOG(@"写容器头失败");
         goto fail;
     }
@@ -291,12 +294,17 @@ done:
     BX_LOG(@"转码完成 %@ (帧数=%lld)", name, (long long)vFrameIdx);
 
 fail:
-    if (oc->pb) avio_closep(&oc->pb);
+    ok = NO;
+    if (oc && oc->pb) avio_closep(&oc->pb);
     if (aenc) avcodec_free_context(&aenc);
     avcodec_free_context(&venc);
     avformat_free_context(oc);
     avcodec_free_context(&vdec);
     if (adec) avcodec_free_context(&adec);
     avformat_close_input(&in);
-    return outPath;
+    if (ok && vFrameIdx > 0) return outPath;
+    if (vFrameIdx <= 0) BX_LOG(@"转码失败：没有解出任何帧");
+    /* 失败就把半成品删掉，绝不再把坏路径交给播放端 */
+    [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
+    return nil;
 }
