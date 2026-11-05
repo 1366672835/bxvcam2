@@ -1,0 +1,135 @@
+name: build-linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths:
+      - 'VCam/**'
+      - 'BXCore/**'
+      - 'Tweak.xm'
+      - 'Makefile'
+      - '.github/workflows/build-linux.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-18 lld-18 llvm-18 make git xz-utils pkg-config
+          clang-18 --version | head -1
+          ld64.lld-18 --version || true
+          llvm-lipo-18 --version || true
+
+      - name: Fetch iOS SDK
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/theos/sdks.git vendor/sdks
+          SDK=$(ls -d vendor/sdks/iPhoneOS*.sdk | sort -V | tail -1)
+          echo "SDK=$PWD/$SDK" >> $GITHUB_ENV
+          echo "using $SDK"
+
+      - name: Cache FFmpeg
+        id: cache-ff
+        uses: actions/cache@v4
+        with:
+          path: vendor/ffmpeg-ios
+          key: ffmpeg-linux-arm64-v1
+
+      - name: Build FFmpeg (arm64 + arm64e, minimal, static)
+        if: steps.cache-ff.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p vendor
+          if [ ! -f vendor/ffmpeg-7.1/configure ]; then
+            curl -fL --retry 5 --retry-delay 5 -o /tmp/ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+            tar xf /tmp/ffmpeg.tar.xz -C vendor
+          fi
+          for ARCH in arm64 arm64e; do
+            BD=vendor/ff-build-$ARCH
+            rm -rf "$BD"; mkdir -p "$BD"; cd "$BD"
+            ../../ffmpeg-7.1/configure \
+              --prefix="$PWD/out" \
+              --arch=arm64 --target-os=darwin --enable-cross-compile \
+              --cc=clang-18 --cxx=clang++-18 \
+              --disable-programs --disable-doc --disable-debug --disable-autodetect \
+              --disable-iconv --disable-zlib --disable-bzlib --disable-lzma \
+              --disable-avdevice --disable-avfilter --disable-postproc \
+              --disable-shared --enable-static --enable-network --enable-pic \
+              --disable-everything \
+              --enable-avformat --enable-avcodec --enable-swscale --enable-swresample \
+              --enable-protocol=file,rtsp,rtp,tcp,udp,rtmp,rtmps,http,https \
+              --enable-demuxer=rtsp,rtp,flv,mov,mp4,m4v,mpegts,h264,hevc,aac,mp3,wav \
+              --enable-decoder=h264,hevc,aac,mp3,pcm_s16le,pcm_f32le,pcm_s16be,pcm_f32be \
+              --enable-parser=h264,hevc,aac,mpegaudio \
+              --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc \
+              --extra-cflags="--target=$ARCH-apple-ios14.0 -isysroot $SDK -O2 -fPIC" \
+              --extra-ldflags="--target=$ARCH-apple-ios14.0 -isysroot $SDK"
+            make -j"$(nproc)"
+            make install
+            cd "$GITHUB_WORKSPACE"
+          done
+          mkdir -p vendor/ffmpeg-ios/lib vendor/ffmpeg-ios/include
+          cp -R vendor/ff-build-arm64/out/include/. vendor/ffmpeg-ios/include/
+          for lib in vendor/ff-build-arm64/out/lib/*.a; do
+            b=$(basename "$lib")
+            llvm-lipo-18 -create vendor/ff-build-arm64/out/lib/$b vendor/ff-build-arm64e/out/lib/$b \
+              -output vendor/ffmpeg-ios/lib/$b
+          done
+          ls -lh vendor/ffmpeg-ios/lib
+
+      - name: Compile + link (both archs)
+        run: |
+          set -euo pipefail
+          INC="-IBXCore -IVCam -Ivendor/ffmpeg-ios/include"
+          FLAGS="-fobjc-arc -O2 -fPIC -Wno-everything -DNDEBUG"
+          FRAMEWORKS="-framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore \
+                      -framework CoreImage -framework AVFoundation -framework CoreMedia -framework CoreVideo \
+                      -framework Accelerate -framework VideoToolbox -framework Security -framework AudioToolbox"
+          mkdir -p build/objs
+          for ARCH in arm64 arm64e; do
+            mkdir -p build/objs/$ARCH
+            for f in BXCore/BXSwizzle.m BXCore/BXLog.m BXCore/BXFloatWindow.m BXCore/BXSimplePanel.m \
+                     BXCore/BXPreviewWindow.m BXCore/BXFloatStore.m \
+                     VCam/BXVideoSource.m VCam/BXFFmpegRTSP.m VCam/BXLocalAudio.m \
+                     VCam/BXCaptureBridge.m VCam/BXAudioUnitHook.m; do
+              o=build/objs/$ARCH/$(echo "$f" | tr '/' '_').o
+              clang-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" $FLAGS $INC -c "$f" -o "$o"
+            done
+            # Tweak.xm 是 ObjC++
+            clang++-18 -x objective-c++ --target=$ARCH-apple-ios14.0 -isysroot "$SDK" $FLAGS $INC \
+              -c Tweak.xm -o build/objs/$ARCH/Tweak.o
+            # C 源
+            clang-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" $FLAGS $INC \
+              -c VCam/BXFishhook.c -o build/objs/$ARCH/BXFishhook.o
+
+            clang++-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" \
+              -dynamiclib -fuse-ld=/usr/bin/ld64.lld-18 \
+              -Wl,-x -install_name @executable_path/BXFloatVCam.dylib \
+              build/objs/$ARCH/*.o \
+              -Lvendor/ffmpeg-ios/lib -lavformat -lavcodec -lswresample -lswscale -lavutil \
+              $FRAMEWORKS \
+              -o build/BXFloatVCam-$ARCH.dylib
+          done
+          llvm-lipo-18 -create build/BXFloatVCam-arm64.dylib build/BXFloatVCam-arm64e.dylib \
+            -output BXFloatVCam.dylib
+          ls -lh BXFloatVCam.dylib
+          file BXFloatVCam.dylib || true
+
+      - name: Verify
+        run: |
+          set -euo pipefail
+          llvm-lipo-18 -info BXFloatVCam.dylib
+          test -s BXFloatVCam.dylib
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: BXFloatVCam-dylib
+          path: BXFloatVCam.dylib
