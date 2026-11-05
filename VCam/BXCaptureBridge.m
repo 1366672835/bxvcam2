@@ -711,6 +711,10 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 - (NSString *)streamFrameReason { return self.rtsp.lastReason ?: @"-"; }
 
 // 供 AudioUnit 钩子拉取：float32 交错立体声（源 48k）
+static NSTimeInterval gLastVideoTick = 0;
+
+- (NSTimeInterval)lastVideoTick { return gLastVideoTick; }
+
 - (NSUInteger)pullAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     BXFFmpegRTSP *r = self.rtsp;
@@ -1086,7 +1090,7 @@ static NSTimeInterval gWdogLastRestart;
                     // 每帧几十毫秒，抖音就会丢帧。
                     renderedDirect = [self.rtsp renderLatestInto:camPx];
                     if (renderedDirect) {
-                        self.replacedFrames += 1;
+                        self.replacedFrames += 1; gLastVideoTick = CACurrentMediaTime();
                         self.replaceFPS = [self tickReplace];
                     }
                 }
@@ -1110,7 +1114,7 @@ static NSTimeInterval gWdogLastRestart;
                     }
 
                     if (BXBlitInto(camPx, use)) {
-                        self.replacedFrames += 1;
+                        self.replacedFrames += 1; gLastVideoTick = CACurrentMediaTime();
                         self.replaceFPS = [self tickReplace];
                     } else {
                         self.buildError = [NSString stringWithFormat:@"写入失败 %zux%zu fmt=%08x",

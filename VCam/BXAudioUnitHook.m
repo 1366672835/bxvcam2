@@ -80,6 +80,19 @@ static void BXAUReadMore(size_t wantFrames) {
 
 // 实际填充（调用方持锁）
 static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioBufferList *ioData, OSStatus *outSt) {
+    // 音画同一条时钟：画面超过 200ms 没有新帧（卡住/断流），就别再放音了。
+    // 原版就是这个行为——画面卡住时声音也停，不会出现"声音一直在跑"的脱节感。
+    {
+        NSTimeInterval tick = [[BXCaptureBridge shared] lastVideoTick];
+        if (tick <= 0 || (CACurrentMediaTime() - tick) > 0.20) {
+            for (UInt32 bi = 0; bi < ioData->mNumberBuffers; bi++) {
+                AudioBuffer *ab = &ioData->mBuffers[bi];
+                if (ab->mData && ab->mDataByteSize) memset(ab->mData, 0, ab->mDataByteSize);
+            }
+            if (outSt) *outSt = noErr;
+            return;
+        }
+    }
     static AudioStreamBasicDescription sASBD;
     static AudioUnit sASBDUnit = NULL;
     static int sASBDFailed = 0;

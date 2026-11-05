@@ -53,6 +53,9 @@
 @property (atomic, readonly) NSString *buildError;
 
 /// 取当前 RTSP/HLS 帧（给预览窗复用，避免开第二路连接）
+// 最后一次真正把画面写进摄像头缓冲的时刻（CACurrentMediaTime）。
+// 音频用它来和画面同步：画面不动，音频就停（原版行为）。
+- (NSTimeInterval)lastVideoTick;
 - (NSUInteger)pullAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames;
 - (CVPixelBufferRef)copyPreviewFrameBGRA CF_RETURNS_RETAINED;
 - (CVPixelBufferRef)copyLatestStreamFrame CF_RETURNS_RETAINED;
