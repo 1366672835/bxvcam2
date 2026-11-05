@@ -71,25 +71,10 @@
         return NO;
     }
 
-    AVAssetReaderTrackOutput *out = nil;
-      // 与视频轨同样的坑：这个 API 会直接抛 NSException（轨/设置不合法、iCloud 占位），
-      // 而这里跑在独立 NSThread 上，外层 @try 抓不到 —— 必须就地兜住。
-      @try {
-          out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:tracks.firstObject
-                                                          outputSettings:settings];
-      } @catch (NSException *ex) {
-          NSLog(@"[BXFloat][audio] 音频输出异常 %@: %@", ex.name, ex.reason);
-          @try {
-              out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:tracks.firstObject
-                                                              outputSettings:nil];
-          } @catch (__unused NSException *ex2) { out = nil; }
-      }
-      if (!out) {
-          if (error) *error = [NSError errorWithDomain:@"BXAudio" code:-2
-                                              userInfo:@{NSLocalizedDescriptionKey: @"无法建立音频输出"}];
-          return NO;
-      }
-      out.alwaysCopiesSampleData = NO;
+    AVAssetReaderTrackOutput *out =
+        [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:tracks.firstObject
+                                                  outputSettings:settings];
+    out.alwaysCopiesSampleData = NO;
     if (![reader canAddOutput:out]) {
         if (error) *error = [NSError errorWithDomain:@"BXAudio" code:-1
                                             userInfo:@{NSLocalizedDescriptionKey: @"无法添加音频输出"}];

@@ -126,23 +126,11 @@ void BXRegisterBuiltinModules(void) {
         gPicker = [BXPickerProxy new];
         gPicker.onPick = ^(NSURL *url) {
             // url 已经是 move 之后的新位置（Documents/…）；直接用它，别再用 picker 给的旧路径
-              // 载入放后台：AVFoundation 建 reader/读首帧在某些文件上会抛 NSException，
-              // 主线程 block 里抛出去就是 SIGABRT（Aweme-2026-11-05 05:06）。
-              dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                  @autoreleasepool {
-                      @try {
-                          NSError *e = nil;
-                          BOOL ok = [[BXCaptureBridge shared] useVideoAtPath:url.path error:&e];
-                          NSLog(@"[BXFloat][vcam] 选片 %@ -> %@", url.lastPathComponent, ok ? @"成功" : (e.localizedDescription ?: @"失败"));
-                          if (ok) [[BXFloatStore shared] setObject:url.path forKey:@"bx.vcam.path"];
-                      } @catch (NSException *ex) {
-                          NSLog(@"[BXFloat][vcam] 选片异常 %@: %@", ex.name, ex.reason);
-                      }
-                      dispatch_async(dispatch_get_main_queue(), ^{
-                          @try { [[BXFloatWindow shared].menu reload]; } @catch (__unused NSException *e2) {}
-                      });
-                  }
-              });
+            NSError *e = nil;
+            BOOL ok = [[BXCaptureBridge shared] useVideoAtPath:url.path error:&e];
+            NSLog(@"[BXFloat][vcam] 选片 %@ -> %@", url.lastPathComponent, ok ? @"成功" : e.localizedDescription);
+            [[BXFloatStore shared] setObject:url.path forKey:@"bx.vcam.path"];
+            [[BXFloatWindow shared].menu reload];
         };
     }
 

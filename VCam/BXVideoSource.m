@@ -151,23 +151,11 @@ static void *kBXPoolKey = &kBXPoolKey;
 
     // 直接按摄像头格式解码（420f/420v）：AVAssetReader 走硬解就能直接出 NV12，
     // 省掉「BGRA 解码 → CIContext 转 420f」那一次全画幅转换。
-    AVAssetReaderTrackOutput *out = nil;
-      @try {
-          out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track
-                                                          outputSettings:[self _readerSettings]];
-      } @catch (NSException *ex) {
-          NSLog(@"[BXFloat][vcam] AssetReaderTrackOutput 异常 %@: %@", ex.name, ex.reason);
-      }
-      if (!out) {
-          @try { out = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:nil]; }
-          @catch (__unused NSException *ex2) { out = nil; }
-      }
-      if (!out) {
-          if (error) *error = [NSError errorWithDomain:@"BXVideoSource" code:3
-                                              userInfo:@{NSLocalizedDescriptionKey: @"无法建立视频输出"}];
-          return NO;
-      }
-      out.alwaysCopiesSampleData = NO;
+    NSDictionary *settings = [self _readerSettings];
+    AVAssetReaderTrackOutput *out =
+        [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track
+                                                   outputSettings:settings];
+    out.alwaysCopiesSampleData = NO;
     if (![reader canAddOutput:out]) {
         if (error) *error = [NSError errorWithDomain:@"BXVideoSource" code:2
                                             userInfo:@{NSLocalizedDescriptionKey: @"无法添加输出"}];

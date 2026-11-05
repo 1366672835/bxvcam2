@@ -461,29 +461,26 @@ static UIColor *C_LINE(void)   { return [UIColor colorWithRed:0.90 green:0.91 bl
 }
 
 - (UIViewController *)hostVC {
-    // 必须从「宿主 App 的窗口」弹选择器：
-    // 我们自己的 BXFloatWindow 是独立浮窗，从它的 rootViewController 弹 UIDocumentPicker，
-    // 系统要么不显示、要么抛 "already presenting"，结果就是点了没反应。
-    UIWindow *host = nil;
-    for (UIWindow *w in [UIApplication sharedApplication].windows) {
-        if ([w isKindOfClass:NSClassFromString(@"BXFloatWindow")]) continue;   // 跳过自己
-        if (w.isKeyWindow) { host = w; break; }
-    }
-    if (!host) {
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            if ([w isKindOfClass:NSClassFromString(@"BXFloatWindow")]) continue;
-            if (w.rootViewController) { host = w; break; }
+    Class wc = NSClassFromString(@"BXFloatWindow");
+    if (wc && [wc respondsToSelector:NSSelectorFromString(@"shared")]) {
+        id win = [wc performSelector:NSSelectorFromString(@"shared")];
+        if ([win isKindOfClass:[UIWindow class]]) {
+            UIViewController *vc = [(UIWindow *)win rootViewController];
+            while (vc.presentedViewController) vc = vc.presentedViewController;
+            if (vc) return vc;
         }
     }
-    UIViewController *vc = host.rootViewController;
-    if (!vc) {                                   // 最后兜底：用浮窗的
-        Class wc = NSClassFromString(@"BXFloatWindow");
-        id win = [wc performSelector:NSSelectorFromString(@"shared")];
-        if ([win isKindOfClass:[UIWindow class]]) vc = [(UIWindow *)win rootViewController];
+    for (UIScene *sc in [UIApplication sharedApplication].connectedScenes) {
+        if (![sc isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+            if (w.isKeyWindow) {
+                UIViewController *vc = w.rootViewController;
+                while (vc.presentedViewController) vc = vc.presentedViewController;
+                return vc;
+            }
+        }
     }
-    while (vc.presentedViewController) vc = vc.presentedViewController;
-    if (!vc) BXLog(@"[BXFloat][panel] hostVC 为空，无法弹选择器");
-    return vc;
+    return nil;
 }
 
 - (void)setModalTouch:(BOOL)allow {

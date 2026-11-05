@@ -9,7 +9,7 @@
 #import "BXColorSpace.h"
 #import "BXVideoSource.h"
 #import "BXFFmpegRTSP.h"
-#import "BXLocalAudio.h"`n`n// 导入转码（BXImportTranscode.m）`nextern NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir);
+#import "BXLocalAudio.h"
 #import "BXPreviewWindow.h"   // 后台停流时判断预览是否开着
 #import "BXFloatStore.h"
 #import <UIKit/UIKit.h>        // UIApplication 前后台通知
@@ -18,9 +18,6 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <CoreImage/CoreImage.h>   // CIContext / CIImage（像素格式转换要用）
-
-// 导入转码（BXImportTranscode.m）：把任意视频规整成标准 mp4
-extern NSString *BXTranscodeToStandardMP4(NSString *inPath, NSString *outDir);
 
 static const void *kBXOrigQueueKey    = &kBXOrigQueueKey;
 
@@ -744,37 +741,15 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 
 - (BOOL)useVideoAtPath:(NSString *)path error:(NSError **)error {
     if (!path.length) return NO;
-
-    // ① 先按原版做法「导入时压缩」：转成标准 mp4（H.264 VT 硬编 + AAC，固定 30fps CFR）
-    //    这样播放端只面对一种格式，音画同步/卡顿问题从源头消掉。
-    NSString *playPath = path;
-    NSString *dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"bximport"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir
-                             withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *std = BXTranscodeToStandardMP4(path, dir);
-    if (std.length) {
-        playPath = std;
-        BXLog(@"[BXFloat][vcam] 导入压缩完成 → %@", std.lastPathComponent);
-    } else {
-        BXLog(@"[BXFloat][vcam] 导入压缩失败，改直接播放原文件");
+    // 音轨一起载入：否则本地视频只有画面、声音还是麦克风
+    @try {
+        [self.localAudio loadURL:[NSURL fileURLWithPath:path] error:NULL];
+    } @catch (NSException *e) {
+        BXLog(@"[BXFloat][vcam] 音轨载入异常 %@", e);
     }
-
-    BXLog(@"[BXFloat][vcam] 本地视频走 FFmpeg: %@", playPath.lastPathComponent);
-
-    self.rtsp.loopPlayback = YES;            // 本地文件默认循环
-    NSError *ffErr = nil;
-    if ([self.rtsp startWithURLString:playPath error:&ffErr]) {
-        BXLog(@"[BXFloat][vcam] 本地视频已载入（FFmpeg）");
-        return YES;
-    }
-    BXLog(@"[BXFloat][vcam] FFmpeg 打开失败: %@", ffErr.localizedDescription);
-    if (error) *error = ffErr ?: [NSError errorWithDomain:@"BXVideo" code:-3
-                                                  userInfo:@{NSLocalizedDescriptionKey: @"FFmpeg 无法打开该文件"}];
-    return NO;
+    return [self.source loadURL:[NSURL fileURLWithPath:path] error:error];
 }
 
-// 说明：本地视频的音轨也由 FFmpeg 解码后进音频环，不再走 AVAssetReader/BXLocalAudio。
-// BXLocalAudio 仅保留给"已通过校验"的兼容文件，当前不再调用。
 #pragma mark - 安装 hook（照原版 0x3258c4-0x325a18）
 
 // 原版把 5 个原始 IMP 存进固定槽位，钩子里直接 blr 调用，不做任何查表。

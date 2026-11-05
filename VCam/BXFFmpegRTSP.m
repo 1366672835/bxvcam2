@@ -310,30 +310,7 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
 
 #pragma mark - 启动
 
-// 生命周期串行化：open/find_stream_info 必须在 _decodeQueue 上执行，
-// 否则 stop() 的 dispatch_sync 无法等它，会释放正在握手的 _fmt ——
-// Aweme-2026-11-05 04:37 的 ff_rtsp_connect 空指针崩溃就是这么来的。
 - (BOOL)startWithURLString:(NSString *)urlString error:(NSError **)error {
-    // decodeLoop 会长期占用 _decodeQueue；此时直接 dispatch_sync 会永久阻塞（界面卡死）。
-    // 已经在跑就先停——stop 自己会等队列排空。
-    if (self.isRunning) {
-        [self stop];
-    }
-    __block BOOL ok = NO;
-    __block NSError *err = nil;
-    void (^job)(void) = ^{
-        ok = [self bx_startNow:urlString error:&err];
-    };
-    if (dispatch_get_specific(kBXDecodeQueueKey) == (__bridge void *)self) {
-        job();                                  // 已在解码队列上，直接跑，避免死锁
-    } else {
-        dispatch_sync(_decodeQueue, job);       // 其它线程：排队，且与 stop 互斥
-    }
-    if (!ok && error) *error = err;
-    return ok;
-}
-
-- (BOOL)bx_startNow:(NSString *)urlString error:(NSError **)error {
     [self stop];
     for (int i = 0; i < 120 && _loopActive; i++) usleep(50 * 1000);
     _generation++;
@@ -645,21 +622,6 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
         // EAGAIN 期间保持原截止，6 秒后中断回调会返回 1，循环才能退出。
         if (_eagainStreak == 0) [self armDeadlineUs:6000000];
         int ret = av_read_frame(_fmt, pkt);
-        // 本地文件要按 PTS 实时播放：文件读得比实时快得多（实测 84fps vs 声明 30fps），
-        // 不节流画面就是快进。网络流天然被网络限速，不需要这段。
-        if (ret >= 0 && self.urlString.length && [self.urlString rangeOfString:@"://"].location == NSNotFound) {
-            AVStream *st = _fmt->streams[pkt->stream_index];
-            if (st && st->time_base.den > 0 && pkt->pts != AV_NOPTS_VALUE) {
-                int64_t us = (int64_t)(pkt->pts * av_q2d(st->time_base) * 1000000.0);
-                static int64_t sFileBaseUs = 0;
-                if (sFileBaseUs == 0) sFileBaseUs = av_gettime_relative() - us;
-                int64_t waitUs = (sFileBaseUs + us) - av_gettime_relative();
-                if (waitUs > 2000) {
-                    if (waitUs > 200000) waitUs = 200000;   // 卡顿时最多等 200ms，避免追帧雪崩
-                    av_usleep((unsigned)waitUs);
-                }
-            }
-        }
         if (ret >= 0) _eagainStreak = 0;
         _readMsAcc += (CACurrentMediaTime() - _t0) * 1000.0;
         if (ret < 0) {
@@ -1065,7 +1027,6 @@ static const BOOL kBXEnableHardwareDecode = NO;
     int dstW = (int)frame->width;      // 原版 dstW = srcW
     int dstH = (int)frame->height;     // 原版 dstH = srcH
 
-
     if (!_sws || frame->width != _srcW || frame->height != _srcH ||
         dstW != _srcW2 || dstH != _srcH2 || _dstPix != (int)dstPix) {
         if (_sws) { sws_freeContext(_sws); _sws = NULL; }
@@ -1084,7 +1045,7 @@ static const BOOL kBXEnableHardwareDecode = NO;
     // 之前我们是 sws_scale → malloc 缓冲 → 逐行 memcpy 进 CVPixelBuffer，
     // 一帧要拷两遍 8MB，48fps 就是 768MB/s 的额外内存带宽。
     // 原版池格式就是 32BGRA（0x332398 处 movk #0x4247 → 'BGRA'）
-      OSType outFmt = (OSType)kCVPixelFormatType_32BGRA;
+    OSType outFmt = (OSType)kCVPixelFormatType_32BGRA;
     CVPixelBufferPoolRef pool = [self srcPoolForSize:CGSizeMake(dstW, dstH) format:outFmt];
     CVPixelBufferRef px = NULL;
     if (pool) {
@@ -1493,8 +1454,6 @@ static const BOOL kBXEnableHardwareDecode = NO;
     if (!_aDec) return NO;
     int rate = (_aOutRate > 0) ? _aOutRate : 48000;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
-      if (ch < 1) ch = 1;
-      if (ch > 2) ch = 2;   // 与 calloc(_aRingFrames*2) 对齐，防堆越界
 
     if (!_swrLock) _swrLock = [[NSRecursiveLock alloc] init];
     [_swrLock lock];
@@ -1523,8 +1482,6 @@ static const BOOL kBXEnableHardwareDecode = NO;
     if (maxOut <= 0) return;
 
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
-      if (ch < 1) ch = 1;
-      if (ch > 2) ch = 2;   // 与 calloc(_aRingFrames*2) 对齐，防堆越界
     size_t needBytes = (size_t)maxOut * ch * sizeof(float);
     if (!_aTmp || _aTmpCap < needBytes) {
         float *nb = realloc(_aTmp, needBytes);
@@ -1547,23 +1504,7 @@ static const BOOL kBXEnableHardwareDecode = NO;
     [_lock lock];
     if (_aRing) {
         size_t need = (size_t)got;
-        // 音频延迟上限：超过 ~150ms 就丢最旧的，避免声音越跑越超前于画面
-      {
-          double rr = (_aOutRate > 0) ? _aOutRate : 48000.0;
-          size_t capFrames = (size_t)(rr * 0.15);
-          if (capFrames < 1024) capFrames = 1024;
-          if (_aFillFrames > capFrames) {
-              size_t drop = _aFillFrames - capFrames;
-              if (drop && _aFillFrames > drop) {
-                  memmove(_aRing, _aRing + drop * ch, (_aFillFrames - drop) * ch * sizeof(float));
-                  _aFillFrames -= drop;
-                  (void)drop;   // 统计留空，避免引用不存在的成员
-              }
-          }
-      }
-      if (ch < 1) ch = 1;
-      if (ch > 2) ch = 2;
-      if (need >= _aRingFrames) need = _aRingFrames;
+        if (need >= _aRingFrames) need = _aRingFrames;
         if (_aFillFrames + need > _aRingFrames) {
             size_t drop = _aFillFrames + need - _aRingFrames;
             if (drop > _aFillFrames) drop = _aFillFrames;
@@ -1580,8 +1521,6 @@ static const BOOL kBXEnableHardwareDecode = NO;
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
-      if (ch < 1) ch = 1;
-      if (ch > 2) ch = 2;   // 与 calloc(_aRingFrames*2) 对齐，防堆越界
     NSUInteger n = 0;
     [_lock lock];
     if (_aRing && _aFillFrames > 0) {
@@ -1604,8 +1543,6 @@ static const BOOL kBXEnableHardwareDecode = NO;
 - (NSUInteger)copyAudioS16:(int16_t *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     int ch = (_aOutCh > 0) ? _aOutCh : 2;
-      if (ch < 1) ch = 1;
-      if (ch > 2) ch = 2;   // 与 calloc(_aRingFrames*2) 对齐，防堆越界
     NSUInteger n = 0;
     [_lock lock];
     if (_aRing && _aFillFrames > 0) {
@@ -1694,3 +1631,4 @@ static const BOOL kBXEnableHardwareDecode = NO;
 - (double)vtMsTotal { return _vtMsAcc; }   // 原版无此统计，仅为头文件声明补齐
 
 @end
+
