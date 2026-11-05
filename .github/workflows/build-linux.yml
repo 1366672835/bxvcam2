@@ -54,7 +54,7 @@ jobs:
           for ARCH in arm64 arm64e; do
             BD=vendor/ff-build-$ARCH
             rm -rf "$BD"; mkdir -p "$BD"; cd "$BD"
-            ../../ffmpeg-7.1/configure \
+            "$GITHUB_WORKSPACE/vendor/ffmpeg-7.1/configure" \
               --prefix="$PWD/out" \
               --arch=arm64 --target-os=darwin --enable-cross-compile \
               --cc=clang-18 --cxx=clang++-18 \
