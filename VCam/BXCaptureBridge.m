@@ -445,16 +445,9 @@ static NSString *BXNormalizeRTSPURL(NSString *raw) {
 // 原版 0x4a836c：「首个会话生效」闩锁，自动开流只做一次。
 static BOOL gAutoStartDone = NO;
 
-// 录制开始/结束会让抖音 stop→start 重建采集会话。这两个时刻我们完全停止写帧：
-// VTPixelTransferSessionTransferImage 是同步等 GPU 的，与它的编码器互等就会整机卡死。
-static NSTimeInterval gBXNoWriteUntil = 0;
 
 #ifdef __cplusplus
 extern "C"
-#endif
-void BXSetNoWriteFor(NSTimeInterval seconds) {
-    gBXNoWriteUntil = CACurrentMediaTime() + seconds;
-}
 
 @implementation BXCaptureBridge
 
