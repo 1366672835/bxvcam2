@@ -41,6 +41,7 @@
 - (void)rebuildSnapshot;
 
 @property (nonatomic, readonly) NSString *rtspURL;
+@property (atomic, readonly) BOOL isStreaming;   // 是否正在拉流（面板用）
 
 /// 进入造帧的次数（排查用）
 @property (nonatomic, readonly) NSUInteger attemptFrames;
