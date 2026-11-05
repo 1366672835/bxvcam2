@@ -714,6 +714,12 @@ static BOOL gAutoStartDone = NO;
 - (NSString *)streamFrameReason { return self.rtsp.lastReason ?: @"-"; }
 
 // 供 AudioUnit 钩子拉取：float32 交错立体声（源 48k）
+// 音频闸门用：最后一帧「新解出」的时刻（转发给 RTSP 的解码打点）。
+// 之前还原文件时把实现删了、头文件声明还在 → 音频判定恒为静音，表现就是"没声音"。
+- (NSTimeInterval)lastVideoTick {
+    return [self.rtsp lastDecodeTick];
+}
+
 - (NSUInteger)pullAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
     if (!dst || maxFrames == 0) return 0;
     BXFFmpegRTSP *r = self.rtsp;
@@ -865,10 +871,16 @@ static void BXSessionStart(id self, SEL _cmd) {
     if (!gAutoStartDone && want && [url isKindOfClass:[NSString class]] && url.length && !br.rtsp.isRunning) {
         gAutoStartDone = YES;   // 置位后即使会话重建也不再开流
         NSString *u = [url copy];
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            BXLog(@"[BXFloat][vcam] 会话启动，自动开始拉流");
-            [br useRTSPURLString:u error:nil];
-        });
+          // 延后 1.5s：会话刚 start 时相机还在启动（日志里能看到中断/重建），
+          // 这时开流会和相机抢资源，表现就是「自动连上来的画面一直卡」。
+          // 手动连流不受影响（那时相机已经稳定）。
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                         dispatch_get_main_queue(), ^{
+              BXLog(@"[BXFloat][vcam] 会话稳定，自动开始拉流（延迟 1.5s）");
+              dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                  [br useRTSPURLString:u error:nil];
+              });
+          });
     }
 }
 
