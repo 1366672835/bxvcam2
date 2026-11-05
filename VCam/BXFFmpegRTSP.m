@@ -1338,46 +1338,24 @@ static NSTimeInterval gLastDecodeTick = 0;
 
 
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
-    [self releaseDueFrames];   // ★必须保留：_latest 只在 releaseDueFrames 里推进（我们用的是队列，不是原版的单槽）
     if (!dst) return NO;
 
-
+    // 【拉模型】每次摄像头拍一次，只从队列里取走一帧——解一帧、写一帧，
+    // 生产者不会一直往前冲，从而消除"后台线程猛推 / 采集线程取"的跨线程争用。
     CVPixelBufferRef src = NULL;
     [_lock lock];
-    if (_latest) src = (CVPixelBufferRef)CVBufferRetain(_latest);
+    if (_qCount > 0) {
+        src = _qBuf[_qHead];
+        _qBuf[_qHead] = NULL;
+        _qHead = (_qHead + 1) % 6;
+        _qCount--;
+    } else if (_latest) {
+        src = (CVPixelBufferRef)CVBufferRetain(_latest);   // 队列空则重复上一帧，画面不黑
+    }
     [_lock unlock];
     if (!src) return NO;
 
-    CFTimeInterval _tvt = CACurrentMediaTime();
-    BOOL ok = [self transferFrom:src to:dst dedicated:YES];   // 摄像头专用会话，不和预览抢
-    double ms = (CACurrentMediaTime() - _tvt) * 1000.0;
-    _vtMsAcc += ms;
-    // 统计 + 自我保护：单帧写超过 25ms 就按"累积性过载"处理，
-    // 连续多次超阈值就直通一段时间（降低 50% 写入频率），避免第 3 次录制时资源耗尽。
-    {
-        static double sAvgMs = 0;
-        static int sSamples = 0;
-        static int sSlowStreak = 0;
-        static double sLogAt = 0;
-        sAvgMs += ms;
-        sSamples++;
-        if (ms > 25.0) sSlowStreak++; else if (sSlowStreak > 0) sSlowStreak--;
-        if (sSlowStreak > 6) {
-            _bxSkipUntil = CACurrentMediaTime() + 0.35;   // 让开 350ms
-            sSlowStreak = 0;
-        }
-        if (CACurrentMediaTime() - sLogAt > 5.0 && sSamples > 0) {
-            BXLog(@"[BXRTSP] 写帧 平均 %.1fms / %d 帧（最近一帧 %.1fms）", sAvgMs / sSamples, sSamples, ms);
-            sAvgMs = 0; sSamples = 0; sLogAt = CACurrentMediaTime();
-        }
-    }
-
-    if (ms > 12.0) {
-        double pause = ms * 3.0;
-        if (pause < 60.0) pause = 60.0;
-        if (pause > 200.0) pause = 200.0;
-        _bxSkipUntil = CACurrentMediaTime() + pause / 1000.0;
-    }
+    BOOL ok = [self transferFrom:src to:dst dedicated:YES];
     CVPixelBufferRelease(src);
     return ok;
 }
