@@ -73,6 +73,21 @@ static void BXFloatVCamInit(void) {
                   });
               }];
           } @catch (NSException *e) { NSLog(@"[B21] 音量键异常 %@", e); }
+
+          // 【诊断 B22】B21 + 1.5 秒重试定时器（每 1.5s 调一次 attach，共 40 次）
+          {
+              __block int tries = 0;
+              dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                          dispatch_get_main_queue());
+              dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 0),
+                                        (uint64_t)(1.5 * NSEC_PER_SEC), 0);
+              dispatch_source_set_event_handler(t, ^{
+                  tries++;
+                  [[BXFloatWindow shared] attach];
+                  if (tries >= 40) dispatch_source_cancel(t);
+              });
+              dispatch_resume(t);
+          }
           return;
 
         // 1. 先装采集桥 —— 必须早于 App 创建 AVCaptureSession
