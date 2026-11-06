@@ -1623,9 +1623,9 @@ static NSTimeInterval gLastDecodeTick = 0;
         // 我们这条上限每帧都会 memmove 丢掉最旧音频，听感就是"一会有一会没"。
         // 环容量 384000 帧（8 秒），消费端跟不上时由读者推进逻辑兜底。
     }
-    size_t fillSnap = _aFillFrames;
+    (void)fillSnap;
     [_lock unlock];
-    [self paceAudioProducerFill:fillSnap ch:ch];   // 照原版：写完按存量节流
+    // 【B88 回退】节流条件用错了（存量>200ms 就睡 300ms），且睡在解码线程上会拖死视频。
 }
 // 原版全程 float32：环里就是 float，直接拷出去，不经过 S16 往返
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
