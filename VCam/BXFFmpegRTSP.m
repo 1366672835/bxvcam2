@@ -90,6 +90,8 @@ static NSString *BXFFErr(int code) {
     uint64_t        _aWriteIdx;          // 环形缓冲绝对写位置（原版 0x4a8300）
     uint64_t        _aReadIdx;           // 消费者绝对读位置（原版 16 段读指针表，我们单消费者单段）
     uint64_t        _aDropped;           // 因落后被跳过的帧
+    uint64_t        _audioPaceWaits;     // 原版 audio pace waits
+    uint64_t        _audioPaceUs;        // 原版 audio pace wait_us
     float          *_aTmp;
     size_t          _aTmpCap;
     int             _aOutRate;
@@ -154,6 +156,7 @@ static NSString *BXFFErr(int code) {
 - (void)recreateVTSession;
 - (BOOL)rebuildSwr;
 - (void)appendAudioFrame:(AVFrame *)af;
+- (void)paceAudioProducerFill:(size_t)fill ch:(int)ch;
 - (CVPixelBufferRef)scaleOnce:(CVPixelBufferRef)src toSize:(CGSize)size CF_RETURNS_RETAINED;
 - (CVPixelBufferRef)transformBuffer:(CVPixelBufferRef)src toSize:(CGSize)targetSize CF_RETURNS_RETAINED;
 - (BOOL)transferFrom:(CVPixelBufferRef)src to:(CVPixelBufferRef)dst dedicated:(BOOL)dedicated;
@@ -1551,6 +1554,28 @@ static NSTimeInterval gLastDecodeTick = 0;
     return ok;
 }
 
+// 【照原版 0x331b40..0x331b9c】音频生产端节奏：
+//   wait = min(超前量, 0.3s)            ← 0x37e4e8 = 0.3
+//   分片 av_usleep，每片 ≤10ms          ← 0x2710 = 10000
+//   代次变化立即中断                    ← ldar [0x40e390]
+- (void)paceAudioProducerFill:(size_t)fill ch:(int)ch {
+    double ar = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
+    size_t lead = (size_t)(ar * 0.20);          // 目标存量 200ms
+    if (fill <= lead) return;
+    double overSec = (double)(fill - lead) / ar;
+    if (overSec > 0.3) overSec = 0.3;
+    int64_t remainUs = (int64_t)(overSec * 1000000.0);
+    uint64_t gen = _generation;
+    while (remainUs > 0) {
+        if (_generation != gen || _stopRequested) break;
+        int64_t step = (remainUs > 10000) ? 10000 : remainUs;
+        av_usleep((unsigned)step);
+        remainUs -= step;
+        _audioPaceWaits += 1;
+        _audioPaceUs += (uint64_t)step;
+    }
+}
+
 - (void)appendAudioFrame:(AVFrame *)af {
     if (!_aRing) return;
     // swr 只在解码线程重建：这里先看有没有待重建标记
@@ -1598,7 +1623,9 @@ static NSTimeInterval gLastDecodeTick = 0;
         // 我们这条上限每帧都会 memmove 丢掉最旧音频，听感就是"一会有一会没"。
         // 环容量 384000 帧（8 秒），消费端跟不上时由读者推进逻辑兜底。
     }
+    size_t fillSnap = _aFillFrames;
     [_lock unlock];
+    [self paceAudioProducerFill:fillSnap ch:ch];   // 照原版：写完按存量节流
 }
 // 原版全程 float32：环里就是 float，直接拷出去，不经过 S16 往返
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
