@@ -297,6 +297,13 @@ static UIWindow *BXHostWindow(UIWindow *selfWin) {
             self.rootViewController.view.backgroundColor = [UIColor clearColor];
         }
     }
+    // initWithWindowScene: 不会调用 initWithFrame:，所以球要在这里补建
+    if (!self.rootViewController) {
+        self.rootViewController = [UIViewController new];
+        self.rootViewController.view.backgroundColor = [UIColor clearColor];
+    }
+    if (!_bubble) [self _buildBubble];
+
     self.windowLevel = UIWindowLevelAlert + 100;
     self.hidden = NO;
     [self _restoreBubblePosition];
