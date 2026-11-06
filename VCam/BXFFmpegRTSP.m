@@ -93,8 +93,6 @@ static NSString *BXFFErr(int code) {
     uint64_t        _audioPaceWaits;     // 原版 audio pace waits
     uint64_t        _audioPaceUs;        // 原版 audio pace wait_us
     int64_t         _audioPaceLastUs;    // 上次写入音频的绝对时间（节奏基准）
-    uint64_t        _audioPaceWaits;     // 原版 audio pace waits
-    uint64_t        _audioPaceUs;        // 原版 audio pace wait_us
     float          *_aTmp;
     size_t          _aTmpCap;
     int             _aOutRate;
@@ -159,7 +157,6 @@ static NSString *BXFFErr(int code) {
 - (void)recreateVTSession;
 - (BOOL)rebuildSwr;
 - (void)appendAudioFrame:(AVFrame *)af;
-- (void)paceAudioProducerFrames:(size_t)frames;
 - (void)paceAudioProducerFill:(size_t)fill ch:(int)ch;
 - (CVPixelBufferRef)scaleOnce:(CVPixelBufferRef)src toSize:(CGSize)size CF_RETURNS_RETAINED;
 - (CVPixelBufferRef)transformBuffer:(CVPixelBufferRef)src toSize:(CGSize)targetSize CF_RETURNS_RETAINED;
@@ -1563,34 +1560,17 @@ static NSTimeInterval gLastDecodeTick = 0;
 //   分片 av_usleep，每片 ≤10ms          ← 0x2710 = 10000
 //   代次变化立即中断                    ← ldar [0x40e390]
 - (void)paceAudioProducerFill:(size_t)fill ch:(int)ch {
-    double ar = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
-    size_t lead = (size_t)(ar * 0.20);          // 目标存量 200ms
-    if (fill <= lead) return;
-    double overSec = (double)(fill - lead) / ar;
-    if (overSec > 0.3) overSec = 0.3;
-    int64_t remainUs = (int64_t)(overSec * 1000000.0);
-    uint64_t gen = _generation;
-    while (remainUs > 0) {
-        if (_generation != gen || _stopRequested) break;
-        int64_t step = (remainUs > 10000) ? 10000 : remainUs;
-        av_usleep((unsigned)step);
-        remainUs -= step;
-        _audioPaceWaits += 1;
-        _audioPaceUs += (uint64_t)step;
-    }
-}
-
-// 【照原版 0x331ad0..0x331b9c】音频生产端节奏（完整数据链）：
-//   expected = 本次帧数 / 采样率；elapsed = 距上次写入的真实经过；ahead = elapsed - expected
-//   if (ahead > 0.05) { ahead -= 0.05; ahead = min(ahead, 0.3); 分片 av_usleep(≤10ms) }
-// 常数 0x37e4d8=0.05 / 0x37e4e0=-0.05 / 0x37e4e8=0.3；代次变化立即中断。
-- (void)paceAudioProducerFrames:(size_t)frames {
-    if (frames == 0) return;
+    // 【照原版 0x331ad0..0x331b9c】参数 fill = 本次写入的音频帧数。
+    //   expected = frames / 采样率；elapsed = 距上次写入的真实经过；ahead = elapsed - expected
+    //   if (ahead > 0.05) { ahead -= 0.05; ahead = min(ahead, 0.3); 分片 av_usleep(≤10ms) }
+    // 常数 0x37e4d8=0.05 / 0x37e4e0=-0.05 / 0x37e4e8=0.3；代次变化立即中断。
+    (void)ch;
+    if (fill == 0) return;
     double rate = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
     int64_t now = av_gettime_relative();
     if (_audioPaceLastUs > 0) {
         double elapsed = (double)(now - _audioPaceLastUs) / 1000000.0;
-        double ahead = elapsed - (double)frames / rate;
+        double ahead = elapsed - (double)fill / rate;
         if (ahead > 0.05) {
             ahead -= 0.05;
             if (ahead > 0.3) ahead = 0.3;
@@ -1658,7 +1638,7 @@ static NSTimeInterval gLastDecodeTick = 0;
     }
     size_t pacedFrames = need;
     [_lock unlock];
-    [self paceAudioProducerFrames:pacedFrames];
+    [self paceAudioProducerFill:pacedFrames ch:ch];   // 原版 0x331ad0 节奏
 }
 // 原版全程 float32：环里就是 float，直接拷出去，不经过 S16 往返
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
