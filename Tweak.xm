@@ -70,18 +70,6 @@ static void BXFloatVCamInit(void) {
                        dispatch_get_main_queue(), ^{
             [[BXFloatWindow shared] attach];
         });
-        // 冷启动/切后台回来时第一秒常拿不到 windowScene，重试几次就挂上了。
-        __block int tries = 0;
-        dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                                                     dispatch_get_main_queue());
-        dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                                  (uint64_t)(1.5 * NSEC_PER_SEC), 0);
-        dispatch_source_set_event_handler(t, ^{
-            tries++;
-            [[BXFloatWindow shared] attach];
-            if (tries >= 8) dispatch_source_cancel(t);   // 12 秒内挂不上就放弃
-        });
-        dispatch_resume(t);
     }
 }
 
