@@ -313,7 +313,7 @@ static NSTimeInterval gLastDecodeTick;   // 前置声明（定义在文件后部
     _aWriteIdx = 0;
     _aReadIdx = 0;
     _aFillFrames = 0;
-    _slotPts = kCMTimeInvalid;
+    _slotPts = 0;
     gLastDecodeTick = 0;      // 写帧闸门关闭（B59 的过期判断会直接直通）
     [_lock unlock];
     BXLog(@"[BXRTSP] 会话停止：已复位缓冲索引与写帧闸门");
