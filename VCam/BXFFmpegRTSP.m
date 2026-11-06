@@ -1636,7 +1636,7 @@ static NSTimeInterval gLastDecodeTick = 0;
         // 我们这条上限每帧都会 memmove 丢掉最旧音频，听感就是"一会有一会没"。
         // 环容量 384000 帧（8 秒），消费端跟不上时由读者推进逻辑兜底。
     }
-    size_t pacedFrames = need;
+    size_t pacedFrames = (size_t)got;   // 本次解码出的音频帧数
     [_lock unlock];
     [self paceAudioProducerFill:pacedFrames ch:ch];   // 原版 0x331ad0 节奏
 }
