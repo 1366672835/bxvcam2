@@ -73,3 +73,23 @@ static void BXFloatVCamInit(void) {
     }
 }
 
+        // 前后台：退后台把浮窗彻底拆掉，回前台再挂一次。
+        // 带 UI 的版本单单"退后台再回来"就卡，而没有 UI 的版本不卡 —— 问题在这一层。
+        @try {
+            NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
+            [nc addObserverForName:UIApplicationDidEnterBackgroundNotification
+                            object:nil queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification *n) {
+                [[BXFloatWindow shared] detach];
+            }];
+            [nc addObserverForName:UIApplicationWillEnterForegroundNotification
+                            object:nil queue:[NSOperationQueue mainQueue]
+                        usingBlock:^(NSNotification *n) {
+                // 回前台延迟 1 秒再挂，避开系统恢复界面的那一段
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    [[BXFloatWindow shared] attach];
+                });
+            }];
+        } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 前后台拆装异常 %@", e); }
+
