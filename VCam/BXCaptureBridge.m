@@ -537,6 +537,26 @@ static BOOL gAutoStartDone = NO;
     return ok;
 }
 
+// 【照原版 0x330aa0 的语义】会话重启（回前台重建、delegate 重设）后：
+//   流没在跑 → 重新开流；流还在跑 → 什么都不做。
+// 原版靠 0x4a836c 闩锁 + url/flag 判断；我们这里用「流是否在跑」判断，
+// 效果一致：断了才重连，没断不动。
+- (void)ensureStreamAfterSessionEvent {
+    if (self.rtsp.isRunning) return;
+    NSString *url = [[BXFloatStore shared] objectForKey:@"rtsp_url"];
+    NSNumber *en  = [[BXFloatStore shared] objectForKey:@"rtsp.enabled"];
+    if (en && !en.boolValue) return;
+    if (![url isKindOfClass:[NSString class]] || !url.length) return;
+    NSString *u = [url copy];
+    self.enabled = YES;
+    // 延后 0.4s：会话刚重建时相机还在起，立刻开流会抢资源
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *e = nil;
+        [self useRTSPURLString:u error:&e];
+        BXLog(@"[BXFloat][vcam] 会话重建后自动开流 → %@ %@", @(self.rtsp.isRunning), e ?: @"ok");
+    });
+}
 - (BOOL)isStreaming { return self.rtsp.isRunning; }
 
 - (NSString *)rtspURL { return self.rtsp.urlString; }
@@ -763,6 +783,9 @@ static void BXVideoSetSampleBufferDelegate(id self, SEL _cmd, id delegate, dispa
     if (gOrigVideoSetter) {
         ((void (*)(id, SEL, id, dispatch_queue_t))gOrigVideoSetter)(self, _cmd, delegate, queue);
     }
+    // 【照原版 0x32fbb0 → 0x330aa0】抖音重设采集 delegate 时（回前台重建会话就会重设）
+    // 原版会再评估一次开流；我们之前只认第一次，导致回前台后流断了也不重连。
+    [[BXCaptureBridge shared] ensureStreamAfterSessionEvent];
 }
 
 // 音频输出 setter 钩子（原版 0x32a674）
