@@ -13,6 +13,7 @@
 #import "BXAudioUnitHook.h"
 #import "BXSwizzle.h"
 #import "BXCaptureBridge.h"
+#import "BXLog.h"
 
 extern "C" void BXRegisterBuiltinModules(void);
 
@@ -89,6 +90,31 @@ static void BXFloatVCamInit(void) {
                 });
             }];
         } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 前后台拆装异常 %@", e); }
+
+        // 【心跳】每 2 秒记录一次各子系统状态，用于冻结后定位"谁先停"。
+        // 关键点：主线程是否还能响应（后台线程 dispatch_async 到主线程，2 秒没执行就算 STALL）。
+        dispatch_source_t hb = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                      dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+        dispatch_source_set_timer(hb, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
+                                  (uint64_t)(2 * NSEC_PER_SEC), (uint64_t)(0.2 * NSEC_PER_SEC));
+        dispatch_source_set_event_handler(hb, ^{
+            static volatile int mainOK = 1;
+            mainOK = 0;
+            dispatch_async(dispatch_get_main_queue(), ^{ mainOK = 1; });
+            usleep(300 * 1000);   // 给主线程 300ms 回应时间
+            BXCaptureBridge *b = [BXCaptureBridge shared];
+            NSTimeInterval age = 0;
+            NSTimeInterval tick = [b lastVideoTick];
+            if (tick > 0) age = CACurrentMediaTime() - tick;
+            BXLog(@"[HB] main=%@ run=%@ dec=%lu age=%.1fs audio=%lu underrun=%lu",
+                  mainOK ? @"OK" : @"STALL",
+                  b.isStreaming ? @"1" : @"0",
+                  (unsigned long)b.decodedFrames,
+                  age,
+                  (unsigned long)b.audioReplaced,
+                  (unsigned long)[b audioUnderruns]);
+        });
+        dispatch_resume(hb);
     }
 }
 
