@@ -63,6 +63,25 @@ static void BXFloatVCamInit(void) {
         // 极简版没有面板，开关无法手动打开：这里强制启用替换，并打开自动开流。
         [BXCaptureBridge shared].enabled = YES;
         [[BXFloatStore shared] setObject:@(1) forKey:@"rtsp.enabled"];
+
+        // 恢复悬浮球/面板挂载（极简版把这段也删了，导致看不到 UI）。
+        // 只做挂载本身：不注册模块、不恢复本地视频、不起其它定时器。
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [[BXFloatWindow shared] attach];
+        });
+        // 冷启动/切后台回来时第一秒常拿不到 windowScene，重试几次就挂上了。
+        __block int tries = 0;
+        dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                     dispatch_get_main_queue());
+        dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                                  (uint64_t)(1.5 * NSEC_PER_SEC), 0);
+        dispatch_source_set_event_handler(t, ^{
+            tries++;
+            [[BXFloatWindow shared] attach];
+            if (tries >= 8) dispatch_source_cancel(t);   // 12 秒内挂不上就放弃
+        });
+        dispatch_resume(t);
     }
 }
 
