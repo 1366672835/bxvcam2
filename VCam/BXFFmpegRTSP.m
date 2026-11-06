@@ -304,6 +304,20 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
 - (NSUInteger)audioDecodedFrames { return _audioDecoded; }
 - (BOOL)interruptRequested { return _stopRequested; }
 
+// 【照原版 0x330cb0】采集会话停止时：清音频环形缓冲索引 + 让写帧闸门关闭，
+// 直到解码线程重新产出新帧。原版不关 RTSP 连接，只复位状态。
+static NSTimeInterval gLastDecodeTick;   // 前置声明（定义在文件后部）
+
+- (void)resetForSessionStop {
+    [_lock lock];
+    _aWriteIdx = 0;
+    _aReadIdx = 0;
+    _aFillFrames = 0;
+    _slotPts = kCMTimeInvalid;
+    gLastDecodeTick = 0;      // 写帧闸门关闭（B59 的过期判断会直接直通）
+    [_lock unlock];
+    BXLog(@"[BXRTSP] 会话停止：已复位缓冲索引与写帧闸门");
+}
 - (void)resetTimeline { [_lock lock]; _latestPTS = kCMTimeInvalid; [_lock unlock]; }
 - (NSUInteger)audioUnderruns { return _audioUnderruns; }
 - (NSUInteger)audioUnderrunFrames { return _audioUnderrunFrames; }
