@@ -1430,7 +1430,7 @@ static NSTimeInterval gLastDecodeTick = 0;
     // 属性只在会话创建后设一次（每帧 set 会拖慢单帧、并可能让 VT 失败）
     if (!*modeSet) {
         VTSessionSetProperty(*slot, kVTPixelTransferPropertyKey_ScalingMode,
-                             kVTScalingMode_Normal);
+                             kVTScalingMode_CropSourceToCleanAperture);   // 原版 0x33006c
         *modeSet = YES;
     }
     OSStatus st = VTPixelTransferSessionTransferImage(*slot, src, dst);
