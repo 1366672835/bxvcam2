@@ -105,7 +105,7 @@ void BXStartMainThreadSampler(void) {
     // 顺带记下镜像基址，便于离线核对
     Dl_info di;
     if (dladdr((void *)&BXStartMainThreadSampler, &di)) {
-        NSLog(@"[BXFloat][sampler] dylib=%s base=%p", BXBaseName(di.dli_fname), di.dli_fbase);
+        BXLogWrite(@"[BXFloat][sampler] dylib=%s base=%p", BXBaseName(di.dli_fname), di.dli_fbase);
     }
 }
 
