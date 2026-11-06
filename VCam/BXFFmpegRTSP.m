@@ -92,6 +92,7 @@ static NSString *BXFFErr(int code) {
     uint64_t        _aDropped;           // 因落后被跳过的帧
     uint64_t        _audioPaceWaits;     // 原版 audio pace waits
     uint64_t        _audioPaceUs;        // 原版 audio pace wait_us
+    int64_t         _audioPaceLastUs;   // 上次写入音频的绝对时间（原版节奏基准）
     float          *_aTmp;
     size_t          _aTmpCap;
     int             _aOutRate;
