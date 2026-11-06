@@ -39,7 +39,7 @@ void BXLogWrite(NSString *format, ...) {
     va_end(ap);
     if (!msg) return;
 
-    NSLog(@"%@", msg);
+    // 不再走 NSLog：抖音的 IESAppLogger 会接管 NSLog，主线程 flush 时会 usleep 卡住 UI。
 
     BXLogInitIfNeeded();
     [gLogLock lock];
