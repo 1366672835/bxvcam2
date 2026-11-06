@@ -96,7 +96,8 @@ static void BXFloatVCamInit(void) {
 
         // 【心跳】每 2 秒记录一次各子系统状态，用于冻结后定位"谁先停"。
         // 关键点：主线程是否还能响应（后台线程 dispatch_async 到主线程，2 秒没执行就算 STALL）。
-        dispatch_source_t hb = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+        static dispatch_source_t hb;   // 必须静态持有：局部变量会被 ARC 释放，定时器就不跑了
+        hb = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
         dispatch_source_set_timer(hb, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
                                   (uint64_t)(2 * NSEC_PER_SEC), (uint64_t)(0.2 * NSEC_PER_SEC));
@@ -109,10 +110,12 @@ static void BXFloatVCamInit(void) {
             NSTimeInterval age = 0;
             NSTimeInterval tick = [b lastVideoTick];
             if (tick > 0) age = CACurrentMediaTime() - tick;
-            BXLog(@"[HB] main=%@ run=%@ dec=%lu age=%.1fs audio=%lu underrun=%lu",
+            UIApplicationState st = [UIApplication sharedApplication].applicationState;
+            BXLog(@"[HB] main=%@ app=%@ run=%@ dec=%lu age=%.1fs audio=%lu underrun=%lu",
                   mainOK ? @"OK" : @"STALL",
-                  b.isStreaming ? @"1" : @"0",
+                  st == UIApplicationStateActive ? @"active" : (st == UIApplicationStateInactive ? @"inactive" : @"bg"),
                   (unsigned long)b.decodedFrames,
+                  b.isStreaming ? @"1" : @"0",
                   age,
                   (unsigned long)b.audioReplaced,
                   (unsigned long)[b audioUnderruns]);
