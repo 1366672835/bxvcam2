@@ -1,13 +1,3 @@
-- (void)resetForSessionStop {
-    // 【B85】只关闭视频写帧闸门，不动音频环：
-    // 拍摄页里 stop/start 很频繁（20 秒能有两三次），每清一次环声音就断一拍 ——
-    // 实测就是这样"一会有一会没"。音频环是连续的，让它跨会话保留。
-    [_lock lock];
-    _slotPts = 0;
-    gLastDecodeTick = 0;      // 视频写帧闸门关闭，直到新帧到达
-    [_lock unlock];
-    BXLog(@"[BXRTSP] 会话停止：关写帧闸门（音频环保留 %zu 帧）", (size_t)_aFillFrames);
-}
 //      av_read_frame → 视频包送 VideoToolbox → 音频包解码+重采样 → 循环
 //
 //  断流（0x33191c）：av_seek_frame 回起点 + flush + 清音频缓冲（不重连）
@@ -309,14 +299,14 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
 static NSTimeInterval gLastDecodeTick;   // 前置声明（定义在文件后部）
 
 - (void)resetForSessionStop {
+    // 【B85】只关视频写帧闸门，不清音频环：
+    // 拍摄页里 stop/start 很频繁，每清一次环声音就断一拍（实测"一会有一会没"）。
     [_lock lock];
-    _aWriteIdx = 0;
-    _aReadIdx = 0;
-    _aFillFrames = 0;
     _slotPts = 0;
-    gLastDecodeTick = 0;      // 写帧闸门关闭（B59 的过期判断会直接直通）
+    gLastDecodeTick = 0;
+    size_t keep = _aFillFrames;
     [_lock unlock];
-    BXLog(@"[BXRTSP] 会话停止：已复位缓冲索引与写帧闸门");
+    BXLog(@"[BXRTSP] 会话停止：关写帧闸门（音频环保留 %zu 帧）", keep);
 }
 - (void)resetTimeline { [_lock lock]; _latestPTS = kCMTimeInvalid; [_lock unlock]; }
 - (NSUInteger)audioUnderruns { return _audioUnderruns; }
