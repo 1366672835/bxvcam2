@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           INC="-IBXCore -IVCam -Ivendor/ff-build-arm64/out/include"
-          FLAGS="-fobjc-arc -O2 -fPIC -Wno-everything -DNDEBUG -arch $ARCH"
+          FLAGS="-fobjc-arc -O2 -fPIC -Wno-everything -DNDEBUG"
           FRAMEWORKS="-framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore \
                       -framework CoreImage -framework AVFoundation -framework CoreMedia -framework CoreVideo \
                       -framework Accelerate -framework VideoToolbox -framework Security -framework AudioToolbox"
@@ -113,13 +113,13 @@ jobs:
                      VCam/BXVideoSource.m VCam/BXFFmpegRTSP.m VCam/BXLocalAudio.m \
                      VCam/BXCaptureBridge.m VCam/BXAudioUnitHook.m; do
               o=build/objs/$ARCH/$(echo "$f" | tr '/' '_').o
-              clang-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" $FLAGS $INC -c "$f" -o "$o"
+              clang-18 --target=$ARCH-apple-ios14.0 -arch $ARCH -isysroot "$SDK" $FLAGS $INC -c "$f" -o "$o"
             done
             # Tweak.xm 是 ObjC++
-            clang++-18 -x objective-c++ --target=$ARCH-apple-ios14.0 -isysroot "$SDK" $FLAGS $INC \
+            clang++-18 -x objective-c++ --target=$ARCH-apple-ios14.0 -arch $ARCH -isysroot "$SDK" $FLAGS $INC \
               -c Tweak.xm -o build/objs/$ARCH/Tweak.o
             # C 源
-            clang-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" $FLAGS $INC \
+            clang-18 --target=$ARCH-apple-ios14.0 -arch $ARCH -isysroot "$SDK" $FLAGS $INC \
               -c VCam/BXFishhook.c -o build/objs/$ARCH/BXFishhook.o
             # Linux 的 ar 生成 GNU 索引，ld64.lld 只认 BSD 符号表 → 补 ranlib
             for lib in vendor/ff-build-$ARCH/out/lib/*.a; do llvm-ranlib-18 "$lib"; done
