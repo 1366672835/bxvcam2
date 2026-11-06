@@ -89,7 +89,35 @@ typedef OSStatus (*BXSetPropFn)(AudioUnit, AudioUnitPropertyID, AudioUnitScope,
 static BXSetPropFn gOrigSetProp = NULL;
 static AudioStreamBasicDescription gCapturedASBD;
 static volatile int gCapturedValid = 0;
+static int gASBDFailed = 0;   // 查格式失败标记（Initialize 钩子会重置）
 static AudioUnit gCapturedUnit = NULL;
+
+// 【照原版 0x333eb0】AudioUnitInitialize 替换：初始化成功后重读 bus1/Input 的 StreamFormat，
+// 并重置"查格式失败"标记与缓存 —— 抖音录完视频会重建音频单元，不重置就第二段没声。
+typedef OSStatus (*BXInitFn)(AudioUnit);
+static BXInitFn gOrigInit = NULL;
+
+static OSStatus BXInitHook(AudioUnit unit) {
+    if (!gOrigInit) return -0x32;
+    OSStatus st = gOrigInit(unit);
+    if (st != noErr || !unit) return st;
+
+    AudioStreamBasicDescription asbd = {0};
+    UInt32 size = sizeof(asbd);
+    if (AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat,
+                             kAudioUnitScope_Input, 1, &asbd, &size) == noErr &&
+        asbd.mSampleRate > 0 && asbd.mChannelsPerFrame > 0) {
+        gCapturedASBD = asbd;
+        gCapturedUnit = unit;
+        gCapturedValid = 1;
+        gASBDFailed = 0;              // ← 重新武装，允许下一次继续填数据
+        BXLogWrite(@"[BXFloat][au] Initialize 后重抓格式 %.0fHz %uch",
+                   asbd.mSampleRate, (unsigned)asbd.mChannelsPerFrame);
+    } else {
+        gASBDFailed = 0;              // 即使查失败也解锁，让 Render 里再试
+    }
+    return st;
+}
 
 static OSStatus BXSetPropHook(AudioUnit unit, AudioUnitPropertyID pid, AudioUnitScope scope,
                               AudioUnitElement elem, const void *data, UInt32 size) {
@@ -128,7 +156,7 @@ static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioB
     }
     static AudioStreamBasicDescription sASBD;
     static AudioUnit sASBDUnit = NULL;
-    static int sASBDFailed = 0;
+
 
     // 优先用 SetProperty 抓到格式（原版就是这么做的），避免在回调里查属性
     if (gCapturedValid && gCapturedUnit == unit && sASBDUnit != unit) {
@@ -139,7 +167,7 @@ static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioB
     }
 
     if (sASBDUnit != unit) {
-        if (sASBDFailed) return;                 // 之前查失败：永久不干预
+        if (gASBDFailed) return;                 // 查格式失败：等下一次 Initialize 重置
         AudioStreamBasicDescription asbd = {0};
         UInt32 size = sizeof(asbd);
         int ok = 0;
@@ -156,7 +184,7 @@ static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioB
                 ok = 1;
             }
         }
-        if (!ok) { sASBDFailed = 1; return; }
+        if (!ok) { gASBDFailed = 1; return; }
         sASBD = asbd;
         sASBDUnit = unit;
         sPos = 0.0;                              // 换 unit：重采样器复位
@@ -274,5 +302,11 @@ void BXAudioUnitHookInstall(void) {
     if (prevSet) gOrigSetProp = (BXSetPropFn)prevSet;
     if (!gOrigSetProp) gOrigSetProp = (BXSetPropFn)dlsym(RTLD_DEFAULT, "AudioUnitSetProperty");
 
-    BXLogWrite(@"[BXFloat][au] audio unit hook installed render=%d setprop=%d", n, n2);
+    // 【照原版】再重绑 AudioUnitInitialize：音频单元重建后重置状态
+    void *prevInit = NULL;
+    int n3 = BXRebindSymbols("AudioUnitInitialize", (void *)BXInitHook, &prevInit);
+    if (prevInit) gOrigInit = (BXInitFn)prevInit;
+    if (!gOrigInit) gOrigInit = (BXInitFn)dlsym(RTLD_DEFAULT, "AudioUnitInitialize");
+
+    BXLogWrite(@"[BXFloat][au] audio unit hook installed render=%d setprop=%d init=%d", n, n2, n3);
 }
