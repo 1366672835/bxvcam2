@@ -63,7 +63,8 @@ static void BXFloatVCamInit(void) {
         }
 
         // 极简版没有面板，开关无法手动打开：这里强制启用替换，并打开自动开流。
-        [BXCaptureBridge shared].enabled = YES;
+        // 【B80 A/B】钩子照装，但完全不写帧、不替换音频：用来判断卡死是"写帧"引起还是"我们的存在"引起
+        [BXCaptureBridge shared].enabled = NO;
         [[BXFloatStore shared] setObject:@(1) forKey:@"rtsp.enabled"];
 
         // 恢复悬浮球/面板挂载（极简版把这段也删了，导致看不到 UI）。
