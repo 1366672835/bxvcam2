@@ -16,6 +16,7 @@
 #import "BXLog.h"
 
 extern "C" void BXRegisterBuiltinModules(void);
+extern void BXStartMainThreadSampler(void);
 
 static void BXAttachIfNeeded(void);
 static void BXOnAppDidBecomeActive(id self, SEL _cmd, id app);
@@ -90,6 +91,8 @@ static void BXFloatVCamInit(void) {
                 });
             }];
         } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 前后台拆装异常 %@", e); }
+
+        BXStartMainThreadSampler();   // 主线程卡死采样（写到 /tmp/bxstall.txt）
 
         // 【心跳】每 2 秒记录一次各子系统状态，用于冻结后定位"谁先停"。
         // 关键点：主线程是否还能响应（后台线程 dispatch_async 到主线程，2 秒没执行就算 STALL）。
