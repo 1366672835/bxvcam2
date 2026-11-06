@@ -1393,6 +1393,25 @@ static NSTimeInterval gLastDecodeTick = 0;
 
     if (!src || !dst) return NO;
 
+    // 【照原版】只有宽高比一致才写：原版用 CropSourceToCleanAperture，不重采样，
+    // 前提就是源/目标同比例（720x1280 → 1080x1920 都是 9:16）。
+    // 比例不一致时直接放行真实摄像头，避免 VT 内部临时建转换器（会阻塞）。
+    {
+        size_t sw = CVPixelBufferGetWidth(src),  sh = CVPixelBufferGetHeight(src);
+        size_t dw = CVPixelBufferGetWidth(dst),  dh = CVPixelBufferGetHeight(dst);
+        if (sw && sh && dw && dh) {
+            double sa = (double)sw / (double)sh;
+            double da = (double)dw / (double)dh;
+            if (fabs(sa - da) > 0.01) {
+                static int sSkip = 0;
+                if (sSkip++ < 3) {
+                    BXLog(@"[BXRTSP] 比例不一致，跳过写帧 %zux%zu -> %zux%zu", sw, sh, dw, dh);
+                }
+                return NO;
+            }
+        }
+    }
+
     VTPixelTransferSessionRef *slot = dedicated ? &sCam : &sAux;
     BOOL *modeSet = dedicated ? &sCamMode : &sAuxMode;
     os_unfair_lock *lk = dedicated ? &sCamLock : &sAuxLock;
