@@ -14,23 +14,25 @@ static NSString *const kBubbleSize     = @"bx.ui.bubble.size";
 @interface BXFloatWindow () <UIGestureRecognizerDelegate>
 @end
 
-// 挂在宿主 window 上的普通浮层：只有落在子视图（悬浮球/面板）上才吃触摸，
-// 其余位置一律返回 nil —— 宿主 App 的点击照常穿透。
+// BXPreviewPassthroughView 的等价实现（照抄原版 0x31fd64 的语义）：
+//   只认一个 interactiveView，只有它的矩形区域吃触摸，其余一律返回 nil，
+//   触摸继续落到下面的 App。
 @interface BXHitPassView : UIView
+@property (nonatomic, strong) UIView *interactiveView;
 @end
 
 @implementation BXHitPassView
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    for (UIView *v in self.subviews.reverseObjectEnumerator) {
-        if (v.hidden || v.alpha < 0.02) continue;
-        CGPoint p = [v convertPoint:point fromView:self];
-        UIView *hit = [v hitTest:p withEvent:event];
-        if (hit) return hit;
-    }
-    return nil;
-}
-@end
 
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *iv = self.interactiveView;
+    if (!iv || iv.hidden) return nil;
+    CGRect r = [iv convertRect:iv.bounds toView:self];
+    if (!CGRectContainsPoint(r, point)) return nil;
+    CGPoint p = [iv convertPoint:point fromView:self];
+    return [iv hitTest:p withEvent:event];
+}
+
+@end
 @implementation BXFloatWindow {
     CGPoint _dragStart;
     CGRect _bubbleStartFrame;
@@ -239,6 +241,9 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
     _menu.view.hidden = NO;
 
     _menu.view.frame = CGRectMake(x, y, w, h);
+    if ([self.rootViewController.view isKindOfClass:[BXHitPassView class]]) {
+        ((BXHitPassView *)self.rootViewController.view).interactiveView = _menu.view;
+    }
     [_menu reload];
 
     [UIView animateWithDuration:0.24
@@ -260,6 +265,9 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
         if (self->_menu.view.alpha < 0.05) {
             // 只隐藏，保留在父视图里 —— 下次展开直接改 alpha 即可
             self->_menu.view.hidden = YES;
+            if ([self.rootViewController.view isKindOfClass:[BXHitPassView class]]) {
+                ((BXHitPassView *)self.rootViewController.view).interactiveView = self->_bubble;
+            }
         }
     }];
 }
@@ -297,13 +305,22 @@ static UIWindow *BXHostWindow(UIWindow *selfWin) {
             self.rootViewController.view.backgroundColor = [UIColor clearColor];
         }
     }
-    // initWithWindowScene: 不会调用 initWithFrame:，所以球要在这里补建
+    // 根视图用穿透视图（原版 BXPreviewPassthroughView 的做法）：
+    // 只有 interactiveView 那个矩形吃触摸，其他位置穿透给抖音。
     if (!self.rootViewController) {
         self.rootViewController = [UIViewController new];
-        self.rootViewController.view.backgroundColor = [UIColor clearColor];
+    }
+    if (![self.rootViewController.view isKindOfClass:[BXHitPassView class]]) {
+        BXHitPassView *pass = [[BXHitPassView alloc] initWithFrame:self.bounds];
+        pass.backgroundColor = [UIColor clearColor];
+        pass.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        self.rootViewController.view = pass;
     }
     if (!_bubble) [self _buildBubble];
 
+    if ([self.rootViewController.view isKindOfClass:[BXHitPassView class]]) {
+        ((BXHitPassView *)self.rootViewController.view).interactiveView = _bubble;
+    }
     self.windowLevel = UIWindowLevelAlert + 100;
     self.hidden = NO;
     [self _restoreBubblePosition];
