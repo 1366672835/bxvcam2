@@ -57,7 +57,7 @@ jobs:
         with:
           path: |
             vendor/ff-build-arm64/out
-            vendor/ff-build-arm64e/out
+
           key: ffmpeg-linux-perarch-v3
 
       - name: Build FFmpeg (arm64 + arm64e, minimal, static)
@@ -95,7 +95,7 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done
           ls -lh vendor/ff-build-arm64/out/lib | head -8
-          ls -lh vendor/ff-build-arm64e/out/lib | head -8
+
 
       - name: Compile + link (both archs)
         run: |
