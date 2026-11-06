@@ -45,8 +45,8 @@ static void BXSigProfHandler(int sig, siginfo_t *info, void *ctx) {
     gSampleSeq++;
     lseek(gStallFD, 0, SEEK_END);   // 追加，保留历史
     char hdr[160];
-    int hn = snprintf(hdr, sizeof(hdr), "=== sample #%d t=%.1f app=%d frames=%d ===\n",
-                      gSampleSeq, (double)CACurrentMediaTime(),
+    int hn = snprintf(hdr, sizeof(hdr), "=== sample #%d pid=%d t=%.1f app=%d frames=%d ===\n",
+                      gSampleSeq, (int)getpid(), (double)CACurrentMediaTime(),
                       (int)[UIApplication sharedApplication].applicationState, n);
     write(gStallFD, hdr, (size_t)hn);
 
@@ -87,7 +87,7 @@ void BXStartMainThreadSampler(void) {
     started = YES;
 
     NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"bxstall.txt"];
-    gStallFD = open(path.fileSystemRepresentation, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    gStallFD = open(path.fileSystemRepresentation, O_WRONLY | O_CREAT | O_APPEND, 0644);  // 追加，绝不清空	
     if (gStallFD < 0) return;
 
     struct sigaction sa;
