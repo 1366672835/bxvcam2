@@ -70,9 +70,6 @@ static void BXFloatVCamInit(void) {
                        dispatch_get_main_queue(), ^{
             [[BXFloatWindow shared] attach];
         });
-    }
-}
-
         // 前后台：退后台把浮窗彻底拆掉，回前台再挂一次。
         // 带 UI 的版本单单"退后台再回来"就卡，而没有 UI 的版本不卡 —— 问题在这一层。
         @try {
@@ -92,4 +89,6 @@ static void BXFloatVCamInit(void) {
                 });
             }];
         } @catch (NSException *e) { NSLog(@"[BXFloat][vcam] 前后台拆装异常 %@", e); }
+    }
+}
 
