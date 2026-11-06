@@ -4,7 +4,7 @@
 //  把麦克风 PCM 换成 RTSP 流音频。
 //
 //  原版日志（0x3336e8）：
-//    "audio unit hook installed backend=symbol_rebinding result=%d input_bus=1
+    BXLogWrite(@"[BXFloat][au] audio unit hook installed render=%d setprop=%d", n, n2);
 //     adaptive_asbd=initialize_setproperty fallback_rate=44100"
 //
 #import <Foundation/Foundation.h>
@@ -82,6 +82,36 @@ static void BXAUReadMore(size_t wantFrames) {
 #pragma mark - 渲染钩子
 
 // 实际填充（调用方持锁）
+// 【照原版】原版重绑了三个 AudioUnit 函数：Render / Initialize / SetProperty。
+// Initialize 与 SetProperty 用来抓真实音频格式，Render 里才有正确参数可用。
+typedef OSStatus (*BXSetPropFn)(AudioUnit, AudioUnitPropertyID, AudioUnitScope,
+                               AudioUnitElement, const void *, UInt32);
+static BXSetPropFn gOrigSetProp = NULL;
+static AudioStreamBasicDescription gCapturedASBD;
+static volatile int gCapturedValid = 0;
+static AudioUnit gCapturedUnit = NULL;
+
+static OSStatus BXSetPropHook(AudioUnit unit, AudioUnitPropertyID pid, AudioUnitScope scope,
+                              AudioUnitElement elem, const void *data, UInt32 size) {
+    if (pid == kAudioUnitProperty_StreamFormat && data &&
+        size >= (UInt32)sizeof(AudioStreamBasicDescription)) {
+        AudioStreamBasicDescription asbd = *(const AudioStreamBasicDescription *)data;
+        if (asbd.mSampleRate > 0 && asbd.mChannelsPerFrame > 0) {
+            gCapturedASBD = asbd;
+            gCapturedUnit = unit;
+            gCapturedValid = 1;
+            static int logged = 0;
+            if (logged++ < 4) {
+                BXLogWrite(@"[BXFloat][au] 抓到格式 %.0fHz %uch flags=%#x bytesPerFrame=%u",
+                      asbd.mSampleRate, (unsigned)asbd.mChannelsPerFrame,
+                      (unsigned)asbd.mFormatFlags, (unsigned)asbd.mBytesPerFrame);
+            }
+        }
+    }
+    return gOrigSetProp ? gOrigSetProp(unit, pid, scope, elem, data, size) : noErr;
+}
+
+
 static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioBufferList *ioData, OSStatus *outSt) {
     // 音画同一条时钟：画面超过 200ms 没有新帧（卡住/断流），就别再放音了。
     // 原版就是这个行为——画面卡住时声音也停，不会出现"声音一直在跑"的脱节感。
@@ -99,6 +129,14 @@ static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioB
     static AudioStreamBasicDescription sASBD;
     static AudioUnit sASBDUnit = NULL;
     static int sASBDFailed = 0;
+
+    // 优先用 SetProperty 抓到格式（原版就是这么做的），避免在回调里查属性
+    if (gCapturedValid && gCapturedUnit == unit && sASBDUnit != unit) {
+        sASBD = gCapturedASBD;
+        sASBDUnit = unit;
+        sPos = 0.0;
+        sSrcLen = 0;
+    }
 
     if (sASBDUnit != unit) {
         if (sASBDFailed) return;                 // 之前查失败：永久不干预
@@ -211,7 +249,7 @@ static OSStatus BXRenderHook(AudioUnit unit, AudioUnitRenderActionFlags *flags,
     BXCaptureBridge *br = [BXCaptureBridge shared];
     if (!br.audioReplace) return st;
 
-    pthread_mutex_lock(&gLock);
+    if (pthread_mutex_trylock(&gLock) != 0) return st;   // 抢不到就放行原数据，绝不让音频线程等锁
     BXFillAudioBuffers(unit, bus, frames, ioData, &st);
     pthread_mutex_unlock(&gLock);
     return st;
@@ -230,5 +268,11 @@ void BXAudioUnitHookInstall(void) {
     if (prev) gOrigRender = (BXRenderFn)prev;
     if (!gOrigRender) gOrigRender = (BXRenderFn)dlsym(RTLD_DEFAULT, "AudioUnitRender");
 
-    BXLogWrite(@"[BXFloat][au] audio unit hook installed backend=symbol_rebinding result=%d input_bus=1 fallback_rate=44100", n);
+    // 【照原版】同时重绑 AudioUnitSetProperty，用它抓真实音频格式
+    void *prevSet = NULL;
+    int n2 = BXRebindSymbols("AudioUnitSetProperty", (void *)BXSetPropHook, &prevSet);
+    if (prevSet) gOrigSetProp = (BXSetPropFn)prevSet;
+    if (!gOrigSetProp) gOrigSetProp = (BXSetPropFn)dlsym(RTLD_DEFAULT, "AudioUnitSetProperty");
+
+    BXLogWrite(@"[BXFloat][au] audio unit hook installed render=%d setprop=%d", n, n2);
 }
