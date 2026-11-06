@@ -1594,19 +1594,9 @@ static NSTimeInterval gLastDecodeTick = 0;
         memcpy(_aRing + _aFillFrames * ch, _aTmp + (got - (int)need) * ch,
                need * ch * sizeof(float));
         _aFillFrames += need;
-        // 延迟上限（B52 版本，听感更好）：缓冲最多保留 ~150ms 音频
-        {
-            double ar = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
-            size_t capFrames = (size_t)(ar * 0.15);
-            if (capFrames < 1024) capFrames = 1024;
-            if (_aFillFrames > capFrames) {
-                size_t d2 = _aFillFrames - capFrames;
-                if (d2 > 0 && d2 < _aFillFrames) {
-                    memmove(_aRing, _aRing + d2 * ch, (_aFillFrames - d2) * ch * sizeof(float));
-                    _aFillFrames -= d2;
-                }
-            }
-        }
+        // 【B86】去掉 150ms 上限：原版环形缓冲没有任何延迟上限（0x331df0 写入 / 0x331da4 推进读者），
+        // 我们这条上限每帧都会 memmove 丢掉最旧音频，听感就是"一会有一会没"。
+        // 环容量 384000 帧（8 秒），消费端跟不上时由读者推进逻辑兜底。
     }
     [_lock unlock];
 }
