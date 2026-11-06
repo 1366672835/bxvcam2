@@ -108,7 +108,7 @@ jobs:
           mkdir -p build/objs
           for ARCH in arm64; do
             mkdir -p build/objs/$ARCH
-            for f in BXCore/BXSwizzle.m BXCore/BXLog.m BXCore/BXFloatWindow.m BXCore/BXSimplePanel.m \
+            for f in BXCore/BXSwizzle.m BXCore/BXLog.m BXCore/BXStallSampler.m BXCore/BXFloatWindow.m BXCore/BXSimplePanel.m \
                      BXCore/BXPreviewWindow.m BXCore/BXFloatStore.m \
                      VCam/BXVideoSource.m VCam/BXFFmpegRTSP.m VCam/BXLocalAudio.m \
                      VCam/BXCaptureBridge.m VCam/BXAudioUnitHook.m; do
