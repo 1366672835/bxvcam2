@@ -185,7 +185,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
         _menu = [BXFloatMenuController new];
         _menu.view.alpha = 0;
         _menu.view.transform = CGAffineTransformMakeScale(0.88, 0.88);
-        [(_overlay ?: _bubble.superview ?: self.rootViewController.view) addSubview:_menu.view];
+        [(_bubble.superview ?: self.rootViewController.view) addSubview:_menu.view];
     }
     BOOL showing = _menu.view.superview != nil && _menu.view.alpha > 0.05;
     if (showing) {
@@ -207,7 +207,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
     CGFloat y = MAX(60, MIN(CGRectGetMidY(_bubble.frame) - h / 2.0, scr.height - h - 60));
 
     // 收起时会把 menu.view 从父视图摘掉，再次展开必须重新挂回去
-    UIView *host = _overlay ?: _bubble.superview ?: self.rootViewController.view;
+    UIView *host = _bubble.superview ?: self.rootViewController.view;
     if (!_menu.view.superview || _menu.view.superview != host) {
         [_menu.view removeFromSuperview];
         [host addSubview:_menu.view];
@@ -259,45 +259,17 @@ static UIWindow *BXHostWindow(UIWindow *selfWin) {
 }
 
 - (void)attach {
-    // 【架构改动】不再显示自己的 UIWindow（那是和宿主抢层级，前后台切换时会被系统拖死）。
-    // 改成：往宿主 keyWindow 上挂一个透明、可穿透的 UIView 浮层，球和面板都放在里面。
-    UIWindow *host = BXHostWindow(self);
-    if (!host) return;
-    UIView *hostRoot = host.rootViewController.view ?: host;
-
-    if (!_overlay) {
-        _overlay = [[BXHitPassView alloc] initWithFrame:hostRoot.bounds];
-        _overlay.backgroundColor = [UIColor clearColor];
-        _overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    }
-    if (_overlay.superview != hostRoot) {
-        [_overlay removeFromSuperview];
-        [hostRoot addSubview:_overlay];
-        _overlay.frame = hostRoot.bounds;
-    }
-
-    // 球与面板搬进浮层（坐标同为全屏，位置不变）
-    UIView *rootView = self.rootViewController.view;
-    if (_bubble && _bubble.superview != _overlay) {
-        CGRect f = _bubble.frame;
-        [_overlay addSubview:_bubble];
-        _bubble.frame = f;
-    }
-    if (_menu && _menu.view.superview != _overlay) {
-        [_overlay addSubview:_menu.view];
-    }
-
-    self.hidden = YES;          // 自己的窗口永不显示
-    self.windowScene = nil;     // 与场景解绑，避免参与恢复
+    // 用自己的 UIWindow，但保持最低限度的干扰：
+    // 不抢 key、不 makeKeyAndVisible、不参与 scene 恢复，也不挂在宿主视图树里。
+    // （挂在宿主 rootView 里会让抖音的布局把浮层一起算进去并逐层记日志，
+    //   日志模块 usleep 会拖死主线程 —— B63~B71 的卡死就是这么来的。）
+    self.windowLevel = UIWindowLevelAlert + 100;
+    self.hidden = NO;
     [self _restoreBubblePosition];
 }
-
 - (void)detach {
     [_menu.view removeFromSuperview];
-    [_bubble removeFromSuperview];
-    [_overlay removeFromSuperview];
-    _overlay = nil;
-    self.hidden = YES;
+    self.hidden = YES;   // 球保留在窗口内，下次 attach 直接显示
 }
 
 #pragma mark - 触摸穿透
