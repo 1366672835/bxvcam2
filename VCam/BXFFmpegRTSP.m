@@ -1,13 +1,13 @@
-//
-//  BXFFmpegRTSP.m —— RTSP 拉流（结构与参数照百相 0.20.33 反汇编结果）
-//
-//  打开参数（0x3312b0 四次 av_dict_set）：
-//      rtsp_transport = tcp
-//      timeout        = 5000000
-//      rw_timeout     = 5000000
-//      buffer_size    = 1048576
-//
-//  单线程顺序流程（0x33187c ~ 0x331d5c 在同一函数内）：
+- (void)resetForSessionStop {
+    // 【B85】只关闭视频写帧闸门，不动音频环：
+    // 拍摄页里 stop/start 很频繁（20 秒能有两三次），每清一次环声音就断一拍 ——
+    // 实测就是这样"一会有一会没"。音频环是连续的，让它跨会话保留。
+    [_lock lock];
+    _slotPts = 0;
+    gLastDecodeTick = 0;      // 视频写帧闸门关闭，直到新帧到达
+    [_lock unlock];
+    BXLog(@"[BXRTSP] 会话停止：关写帧闸门（音频环保留 %zu 帧）", (size_t)_aFillFrames);
+}
 //      av_read_frame → 视频包送 VideoToolbox → 音频包解码+重采样 → 循环
 //
 //  断流（0x33191c）：av_seek_frame 回起点 + flush + 清音频缓冲（不重连）
