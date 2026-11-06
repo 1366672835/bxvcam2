@@ -71,19 +71,6 @@ static void BXFloatVCamInit(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             [[BXFloatWindow shared] attach];
-        });
-        // 前后台：退后台把浮窗彻底拆掉，回前台再挂一次。
-        // 带 UI 的版本单单"退后台再回来"就卡，而没有 UI 的版本不卡 —— 问题在这一层。
-        @try {
-            NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-            [nc addObserverForName:UIApplicationDidEnterBackgroundNotification
-                            object:nil queue:[NSOperationQueue mainQueue]
-                        usingBlock:^(NSNotification *n) {
-                [[BXFloatWindow shared] detach];
-            }];
-            // 【B71 A/B】回前台不再重挂浮层：验证"重挂触发抖音布局→日志usleep"这一假设。
-            // 需要面板时重启 App 即可；确认根因后再改成温和的重挂方式。
-        } @catch (NSException *e) { BXLogWrite(@"[BXFloat][vcam] 前后台拆装异常 %@", e); }
 
         BXStartMainThreadSampler();   // 主线程卡死采样（写到 /tmp/bxstall.txt）
 
