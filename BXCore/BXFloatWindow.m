@@ -14,10 +14,28 @@ static NSString *const kBubbleSize     = @"bx.ui.bubble.size";
 @interface BXFloatWindow () <UIGestureRecognizerDelegate>
 @end
 
+// 挂在宿主 window 上的普通浮层：只有落在子视图（悬浮球/面板）上才吃触摸，
+// 其余位置一律返回 nil —— 宿主 App 的点击照常穿透。
+@interface BXHitPassView : UIView
+@end
+
+@implementation BXHitPassView
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    for (UIView *v in self.subviews.reverseObjectEnumerator) {
+        if (v.hidden || v.alpha < 0.02) continue;
+        CGPoint p = [v convertPoint:point fromView:self];
+        UIView *hit = [v hitTest:p withEvent:event];
+        if (hit) return hit;
+    }
+    return nil;
+}
+@end
+
 @implementation BXFloatWindow {
     CGPoint _dragStart;
     CGRect _bubbleStartFrame;
     BOOL _dragging;
+    UIView *_overlay;
 }
 
 + (instancetype)shared {
@@ -222,17 +240,61 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
 
 #pragma mark - 挂载/卸载
 
+// 找一个宿主窗口（不用自己的 UIWindow，避免和宿主抢层级/抢场景恢复）
+static UIWindow *BXHostWindow(UIWindow *selfWin) {
+    UIWindow *fallback = nil;
+    for (UIScene *sc in [UIApplication sharedApplication].connectedScenes) {
+        if (![sc isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+            if (w == selfWin || w.hidden) continue;
+            if (w.windowLevel == UIWindowLevelNormal && w.rootViewController) return w;
+            if (!fallback && w.rootViewController) fallback = w;
+        }
+    }
+    if (fallback) return fallback;
+    if (@available(iOS 13.0, *)) { } 
+    return [UIApplication sharedApplication].keyWindow;
+}
+
 - (void)attach {
-    // 不要用 makeKeyAndVisible —— 那会把宿主 App 的 key window 抢走，
-    // 有些 App（尤其带播放器的）会因此黑屏或异常。
-    self.hidden = NO;
-    self.windowLevel = UIWindowLevelAlert + 100;
+    // 【架构改动】不再显示自己的 UIWindow（那是和宿主抢层级，前后台切换时会被系统拖死）。
+    // 改成：往宿主 keyWindow 上挂一个透明、可穿透的 UIView 浮层，球和面板都放在里面。
+    UIWindow *host = BXHostWindow(self);
+    if (!host) return;
+    UIView *hostRoot = host.rootViewController.view ?: host;
+
+    if (!_overlay) {
+        _overlay = [[BXHitPassView alloc] initWithFrame:hostRoot.bounds];
+        _overlay.backgroundColor = [UIColor clearColor];
+        _overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    }
+    if (_overlay.superview != hostRoot) {
+        [_overlay removeFromSuperview];
+        [hostRoot addSubview:_overlay];
+        _overlay.frame = hostRoot.bounds;
+    }
+
+    // 球与面板搬进浮层（坐标同为全屏，位置不变）
+    UIView *rootView = self.rootViewController.view;
+    if (_bubble && _bubble.superview != _overlay) {
+        CGRect f = _bubble.frame;
+        [_overlay addSubview:_bubble];
+        _bubble.frame = f;
+    }
+    if (_menu && _menu.view.superview != _overlay) {
+        [_overlay addSubview:_menu.view];
+    }
+
+    self.hidden = YES;          // 自己的窗口永不显示
+    self.windowScene = nil;     // 与场景解绑，避免参与恢复
     [self _restoreBubblePosition];
-    [self setNeedsLayout];
 }
 
 - (void)detach {
     [_menu.view removeFromSuperview];
+    [_bubble removeFromSuperview];
+    [_overlay removeFromSuperview];
+    _overlay = nil;
     self.hidden = YES;
 }
 
