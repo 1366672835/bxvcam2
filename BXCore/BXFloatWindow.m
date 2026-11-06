@@ -209,6 +209,11 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
     if (_dragging) return;
     if (!_menu) {
         _menu = [BXFloatMenuController new];
+        __weak typeof(self) ws = self;
+        _menu.onRequestClose = ^{
+            __strong typeof(ws) s = ws;
+            if (s) [s _collapseMenu];
+        };
         _menu.view.alpha = 0;
         _menu.view.transform = CGAffineTransformMakeScale(0.88, 0.88);
         [(_bubble.superview ?: self.rootViewController.view) addSubview:_menu.view];
@@ -223,8 +228,8 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
 
 - (void)_expandMenu {
     CGSize scr = [UIScreen mainScreen].bounds.size;
-    CGFloat w = MIN(320.0, scr.width - 24);   // 新面板就是 320 宽
-    CGFloat h = MIN(300.0, scr.height * 0.5);
+    CGFloat w = MIN(340.0, scr.width - 16);   // 新面板 340 宽
+    CGFloat h = MIN(460.0, scr.height - 80);  // 新面板 460 高
 
     BOOL leftSide = CGRectGetMidX(_bubble.frame) < scr.width / 2.0;
     CGFloat x = leftSide ? (CGRectGetMaxX(_bubble.frame) + 12)
