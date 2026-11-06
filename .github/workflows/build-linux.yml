@@ -101,7 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           INC="-IBXCore -IVCam -Ivendor/ff-build-arm64/out/include"
-          FLAGS="-fobjc-arc -O2 -fPIC -Wno-everything -DNDEBUG"
+          FLAGS="-fobjc-arc -O2 -fPIC -Wno-everything -DNDEBUG -arch $ARCH"
           FRAMEWORKS="-framework UIKit -framework Foundation -framework CoreGraphics -framework QuartzCore \
                       -framework CoreImage -framework AVFoundation -framework CoreMedia -framework CoreVideo \
                       -framework Accelerate -framework VideoToolbox -framework Security -framework AudioToolbox"
@@ -124,7 +124,7 @@ jobs:
             # Linux 的 ar 生成 GNU 索引，ld64.lld 只认 BSD 符号表 → 补 ranlib
             for lib in vendor/ff-build-$ARCH/out/lib/*.a; do llvm-ranlib-18 "$lib"; done
 
-            clang++-18 --target=$ARCH-apple-ios14.0 -isysroot "$SDK" \
+            clang++-18 --target=$ARCH-apple-ios14.0 -arch $ARCH -isysroot "$SDK" \
               -dynamiclib -fuse-ld=/usr/bin/ld64.lld-18 \
               -Wl,-arch,$ARCH -Wl,-platform_version,ios,14.0,16.5 \
               -Wl,-x -install_name @executable_path/BXFloatVCam.dylib \
