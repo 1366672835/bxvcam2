@@ -864,6 +864,8 @@ static void BXSessionStart(id self, SEL _cmd) {
 static void BXSessionStop(id self, SEL _cmd) {
     BXLog(@"[BXFloat][vcam] capture session stop running=%@", NSStringFromClass([self class]));   // 原版 0x32a9d4 同位置
     if (gOrigStopRunning) ((void (*)(id, SEL))gOrigStopRunning)(self, _cmd);
+    // 【照原版 0x330c00 / 0x330cb0】会话停止：复位缓冲索引，关闭写帧闸门直到有新帧
+    [[BXCaptureBridge shared].rtsp resetForSessionStop];
 }
 
 // 原版 0x32a9d4
