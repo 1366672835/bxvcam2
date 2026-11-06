@@ -16,8 +16,11 @@
 #import <string.h>
 
 #import "BXAudioUnitHook.h"
+#import "BXLog.h"
 #import "BXFishhook.h"
+#import "BXLog.h"
 #import "BXCaptureBridge.h"
+#import "BXLog.h"
 
 typedef OSStatus (*BXRenderFn)(AudioUnit unit, AudioUnitRenderActionFlags *flags,
                                const AudioTimeStamp *ts, UInt32 bus,
@@ -227,5 +230,5 @@ void BXAudioUnitHookInstall(void) {
     if (prev) gOrigRender = (BXRenderFn)prev;
     if (!gOrigRender) gOrigRender = (BXRenderFn)dlsym(RTLD_DEFAULT, "AudioUnitRender");
 
-    NSLog(@"[BXFloat][au] audio unit hook installed backend=symbol_rebinding result=%d input_bus=1 fallback_rate=44100", n);
+    BXLogWrite(@"[BXFloat][au] audio unit hook installed backend=symbol_rebinding result=%d input_bus=1 fallback_rate=44100", n);
 }
