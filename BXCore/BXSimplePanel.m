@@ -87,9 +87,10 @@
     [self addButton:@"连接"   x:pad                            y:by w:bw h:bh color:C_BLUE()  action:@selector(onConnect)];
     [self addButton:@"重连"   x:pad + bw + 8                    y:by w:bw h:bh color:C_CARD()  action:@selector(onReconnect)];
     [self addButton:@"断开"   x:pad + (bw + 8) * 2              y:by w:bw h:bh color:C_RED()   action:@selector(onDisconnect)];
+    [self addButton:@"复制日志" x:pad y:by + bh + 8 w:w - pad * 2 h:30 color:C_CARD() action:@selector(onCopyLog)];
 
     // 状态卡
-    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(pad, 144, w - pad * 2, 108)];
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(pad, 180, w - pad * 2, 108)];
     card.backgroundColor = C_CARD();
     card.layer.cornerRadius = 10;
     [self.view addSubview:card];
@@ -107,7 +108,7 @@
     [card addSubview:_detailLabel];
 
     // 说明
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(pad, 262, w - pad * 2, 32)];
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(pad, 296, w - pad * 2, 32)];
     hint.numberOfLines = 2;
     hint.font = [UIFont systemFontOfSize:10];
     hint.textColor = C_SUB();
@@ -183,6 +184,11 @@
     [[BXCaptureBridge shared] stopNetworkSources];
     [self toast:@"已断开"];
     [self refresh];
+}
+
+- (void)onCopyLog {
+    [UIPasteboard generalPasteboard].string = BXLogText();
+    [self toast:@"日志已复制，粘贴给我即可"];
 }
 
 - (void)toast:(NSString *)msg {
