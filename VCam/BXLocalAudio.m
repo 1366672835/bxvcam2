@@ -6,6 +6,7 @@
 //
 
 #import "BXLocalAudio.h"
+#import "BXLog.h"
 #import <AVFoundation/AVFoundation.h>
 
 @interface BXLocalAudio ()
@@ -50,7 +51,7 @@
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:url options:nil];
     NSArray *tracks = [asset tracksWithMediaType:AVMediaTypeAudio];
     if (tracks.count == 0) {
-        NSLog(@"[BXFloat][audio] 该视频没有音轨: %@", url.lastPathComponent);
+        BXLogWrite(@"[BXFloat][audio] 该视频没有音轨: %@", url.lastPathComponent);
         return NO;
     }
 
@@ -91,7 +92,7 @@
     self.loaded = YES;
     [_lock unlock];
 
-    NSLog(@"[BXFloat][audio] 本地音轨已载入: %@", url.lastPathComponent);
+    BXLogWrite(@"[BXFloat][audio] 本地音轨已载入: %@", url.lastPathComponent);
     return YES;
 }
 
