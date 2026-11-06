@@ -114,8 +114,8 @@ static void BXFloatVCamInit(void) {
             BXLog(@"[HB] main=%@ app=%@ run=%@ dec=%lu age=%.1fs audio=%lu underrun=%lu",
                   mainOK ? @"OK" : @"STALL",
                   st == UIApplicationStateActive ? @"active" : (st == UIApplicationStateInactive ? @"inactive" : @"bg"),
-                  (unsigned long)b.decodedFrames,
                   b.isStreaming ? @"1" : @"0",
+                  (unsigned long)b.decodedFrames,
                   age,
                   (unsigned long)b.audioReplaced,
                   (unsigned long)[b audioUnderruns]);
