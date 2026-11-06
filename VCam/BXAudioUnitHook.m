@@ -4,7 +4,7 @@
 //  把麦克风 PCM 换成 RTSP 流音频。
 //
 //  原版日志（0x3336e8）：
-    BXLogWrite(@"[BXFloat][au] audio unit hook installed render=%d setprop=%d", n, n2);
+//     audio unit hook installed backend=symbol_rebinding result=%d input_bus=1
 //     adaptive_asbd=initialize_setproperty fallback_rate=44100"
 //
 #import <Foundation/Foundation.h>
