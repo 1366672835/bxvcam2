@@ -9,10 +9,15 @@
 //
 
 #import "BXPreviewWindow.h"
+#import "BXLog.h"
 #import "BXFFmpegRTSP.h"
+#import "BXLog.h"
 #import "BXFloatStore.h"
+#import "BXLog.h"
 #import "BXConfig.h"
+#import "BXLog.h"
 #import "BXCaptureBridge.h"
+#import "BXLog.h"
 #import <AVFoundation/AVFoundation.h>
 #import <QuartzCore/QuartzCore.h>
 
@@ -313,7 +318,7 @@
     // 只停预览自己那一路解码，采集桥（正在替换摄像头的拉流）完全不动
     [self stopSources];
     self.hidden = YES;
-    NSLog(@"[BXFloat][preview] 停止预览（采集桥的拉流未受影响）");
+    BXLogWrite(@"[BXFloat][preview] 停止预览（采集桥的拉流未受影响）");
 }
 
 @end
