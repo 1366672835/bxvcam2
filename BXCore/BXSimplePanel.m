@@ -23,6 +23,8 @@
 #define C_GREEN()  [UIColor colorWithRed:0.20 green:0.78 blue:0.45 alpha:1.0]
 #define C_RED()    [UIColor colorWithRed:0.92 green:0.30 blue:0.28 alpha:1.0]
 
+extern NSString *BXStallSampleText(void);
+
 @interface BXFloatMenuController ()
 @property (nonatomic, strong) UITextField *urlField;
 @property (nonatomic, strong) UILabel     *stateLabel;
@@ -187,7 +189,13 @@
 }
 
 - (void)onCopyLog {
-    [UIPasteboard generalPasteboard].string = BXLogText();
+    [UIPasteboard generalPasteboard].string =
+        [NSString stringWithFormat:@"=== 日志 ===
+%@
+
+=== 主线程采样 ===
+%@",
+                                   BXLogText(), BXStallSampleText()];
     [self toast:@"日志已复制，粘贴给我即可"];
 }
 
