@@ -69,7 +69,7 @@ jobs:
             curl -fL --retry 10 --retry-all-errors --retry-delay 5 --connect-timeout 30 -o /tmp/ffmpeg.tar.xz https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
             tar xf /tmp/ffmpeg.tar.xz -C vendor
           fi
-          for ARCH in arm64 arm64e; do
+          for ARCH in arm64; do
             BD=vendor/ff-build-$ARCH
             rm -rf "$BD"; mkdir -p "$BD"; cd "$BD"
             "$GITHUB_WORKSPACE/vendor/ffmpeg-7.1/configure" \
@@ -106,7 +106,7 @@ jobs:
                       -framework CoreImage -framework AVFoundation -framework CoreMedia -framework CoreVideo \
                       -framework Accelerate -framework VideoToolbox -framework Security -framework AudioToolbox"
           mkdir -p build/objs
-          for ARCH in arm64 arm64e; do
+          for ARCH in arm64; do
             mkdir -p build/objs/$ARCH
             for f in BXCore/BXSwizzle.m BXCore/BXLog.m BXCore/BXFloatWindow.m BXCore/BXSimplePanel.m \
                      BXCore/BXPreviewWindow.m BXCore/BXFloatStore.m \
@@ -133,15 +133,14 @@ jobs:
               $FRAMEWORKS \
               -o build/BXFloatVCam-$ARCH.dylib
           done
-          llvm-lipo-18 -create build/BXFloatVCam-arm64.dylib build/BXFloatVCam-arm64e.dylib \
-            -output BXFloatVCam.dylib
+          cp build/BXFloatVCam-arm64.dylib BXFloatVCam.dylib
           ls -lh BXFloatVCam.dylib
           file BXFloatVCam.dylib || true
 
       - name: Verify
         run: |
           set -euo pipefail
-          llvm-lipo-18 -info BXFloatVCam.dylib
+          llvm-objdump-18 --macho --private-headers BXFloatVCam.dylib | grep -i cpusubtype | head -2
           test -s BXFloatVCam.dylib
 
       - name: Upload
