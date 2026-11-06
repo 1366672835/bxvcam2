@@ -38,11 +38,35 @@ static NSString *const kBubbleSize     = @"bx.ui.bubble.size";
     UIView *_overlay;
 }
 
+// 取当前处于前台活跃状态的 UIWindowScene（原版同样用 connectedScenes 找 scene）
+static UIWindowScene *BXActiveScene(void) {
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]] &&
+                s.activationState == UISceneActivationStateForegroundActive) {
+                return (UIWindowScene *)s;
+            }
+        }
+        for (UIScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if ([s isKindOfClass:[UIWindowScene class]]) return (UIWindowScene *)s;
+        }
+    }
+    return nil;
+}
+
 + (instancetype)shared {
     static BXFloatWindow *inst;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        inst = [[BXFloatWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        // 【对齐原版】用 initWithWindowScene: 创建，窗口才有归属 scene；
+        // 之前用 initWithFrame: 创建，窗口没有 scene，前后台切换时会被系统搁置。
+        UIWindowScene *sc = BXActiveScene();
+        if (sc) {
+            inst = [[BXFloatWindow alloc] initWithWindowScene:sc];
+            inst.frame = sc.coordinateSpace.bounds;
+        } else {
+            inst = [[BXFloatWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        }
     });
     return inst;
 }
@@ -263,6 +287,16 @@ static UIWindow *BXHostWindow(UIWindow *selfWin) {
     // 不抢 key、不 makeKeyAndVisible、不参与 scene 恢复，也不挂在宿主视图树里。
     // （挂在宿主 rootView 里会让抖音的布局把浮层一起算进去并逐层记日志，
     //   日志模块 usleep 会拖死主线程 —— B63~B71 的卡死就是这么来的。）
+    if (@available(iOS 13.0, *)) {
+        if (!self.windowScene) {
+            UIWindowScene *sc = BXActiveScene();
+            if (sc) { self.windowScene = sc; self.frame = sc.coordinateSpace.bounds; }
+        }
+        if (!self.rootViewController) {
+            self.rootViewController = [UIViewController new];
+            self.rootViewController.view.backgroundColor = [UIColor clearColor];
+        }
+    }
     self.windowLevel = UIWindowLevelAlert + 100;
     self.hidden = NO;
     [self _restoreBubblePosition];
