@@ -189,13 +189,9 @@ extern NSString *BXStallSampleText(void);
 }
 
 - (void)onCopyLog {
-    [UIPasteboard generalPasteboard].string =
-        [NSString stringWithFormat:@"=== 日志 ===
-%@
-
-=== 主线程采样 ===
-%@",
-                                   BXLogText(), BXStallSampleText()];
+    NSString *all = [NSString stringWithFormat:@"=== 日志 ===\n%@\n\n=== 主线程采样 ===\n%@",
+                               BXLogText(), BXStallSampleText()];
+    [UIPasteboard generalPasteboard].string = all;
     [self toast:@"日志已复制，粘贴给我即可"];
 }
 
