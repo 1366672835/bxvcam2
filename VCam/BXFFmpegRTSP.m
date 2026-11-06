@@ -156,35 +156,7 @@ static NSString *BXFFErr(int code) {
 - (void)recreateVTSession;
 - (BOOL)rebuildSwr;
 - (void)appendAudioFrame:(AVFrame *)af;
-- (void)paceAudioProducerFill:(size_t)fill ch:(int)ch;
-- (CVPixelBufferRef)scaleOnce:(CVPixelBufferRef)src toSize:(CGSize)size CF_RETURNS_RETAINED;
-- (CVPixelBufferRef)transformBuffer:(CVPixelBufferRef)src toSize:(CGSize)targetSize CF_RETURNS_RETAINED;
-- (BOOL)transferFrom:(CVPixelBufferRef)src to:(CVPixelBufferRef)dst dedicated:(BOOL)dedicated;
-- (BOOL)transferFrom:(CVPixelBufferRef)src to:(CVPixelBufferRef)dst;
-- (CVPixelBufferPoolRef)poolForSize:(CGSize)size format:(OSType)fmt;
-- (CVPixelBufferPoolRef)srcPoolForSize:(CGSize)size format:(OSType)fmt;
-
-@property (atomic, copy) NSString *lastReasonText;
-@property (atomic, copy) NSString *codecNameText;
-@property (atomic, copy) NSString *transportText;
-@property (atomic, assign) BOOL running;
-@property (atomic, copy)   NSString *urlString;
-@property (atomic, assign) CGSize size;
-@property (atomic, assign) NSUInteger decodedFrames;
-@property (atomic, assign) NSUInteger droppedFrames;
-
-@end
-
-// 阻塞在 av_read_frame / avformat_open_input 时，只有中断回调能把它叫醒。
-// 返回非 0 会让 FFmpeg 立刻放弃当前阻塞操作（AVERROR_EXIT）。
-static int BXInterruptCB(void *opaque) {
-    BXFFmpegRTSP *me = (__bridge BXFFmpegRTSP *)opaque;
-    if (!me) return 0;
-    if ([me interruptRequested]) return 1;                 // 显式停止
-    int64_t dl = [me deadlineUs];
-    if (dl > 0 && av_gettime_relative() > dl) return 1;    // 原版：6s 超时自动中断
-    return 0;
-}
+- (void)paceAudioProducerFrames:(size_t)frames;   // 原版 0x331ad0 音频节奏
 
 // 用来判断 stop 是否正跑在解码队列上（是的话不能 dispatch_sync，否则死锁）
 static void *kBXDecodeQueueKey = &kBXDecodeQueueKey;
@@ -1554,26 +1526,38 @@ static NSTimeInterval gLastDecodeTick = 0;
     return ok;
 }
 
-// 【照原版 0x331b40..0x331b9c】音频生产端节奏：
-//   wait = min(超前量, 0.3s)            ← 0x37e4e8 = 0.3
-//   分片 av_usleep，每片 ≤10ms          ← 0x2710 = 10000
-//   代次变化立即中断                    ← ldar [0x40e390]
-- (void)paceAudioProducerFill:(size_t)fill ch:(int)ch {
-    double ar = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
-    size_t lead = (size_t)(ar * 0.20);          // 目标存量 200ms
-    if (fill <= lead) return;
-    double overSec = (double)(fill - lead) / ar;
-    if (overSec > 0.3) overSec = 0.3;
-    int64_t remainUs = (int64_t)(overSec * 1000000.0);
-    uint64_t gen = _generation;
-    while (remainUs > 0) {
-        if (_generation != gen || _stopRequested) break;
-        int64_t step = (remainUs > 10000) ? 10000 : remainUs;
-        av_usleep((unsigned)step);
-        remainUs -= step;
-        _audioPaceWaits += 1;
-        _audioPaceUs += (uint64_t)step;
+
+// 【照原版 0x331ad0..0x331b9c 完整数据链】音频生产端节奏：
+//   expected = 本次音频帧数 / 采样率            （音频真实时长）
+//   elapsed  = 距上次写入的实际经过时间
+//   ahead    = elapsed - expected
+//   if (ahead > 0.05) { ahead -= 0.05; ahead = min(ahead, 0.3); 分片睡 }
+// 常数：0x37e4d8=0.05 阈值、0x37e4e0=-0.05 补偿、0x37e4e8=0.3 上限。
+// 正常情况下 ahead≈0，一次都不睡 —— 所以不会拖慢同一线程上的视频解码。
+- (void)paceAudioProducerFrames:(size_t)frames {
+    if (frames == 0) return;
+    double rate = (_aOutRate > 0) ? (double)_aOutRate : 48000.0;
+    int64_t now = av_gettime_relative();
+    if (_audioPaceLastUs > 0) {
+        double elapsed = (double)(now - _audioPaceLastUs) / 1000000.0;
+        double expected = (double)frames / rate;
+        double ahead = elapsed - expected;
+        if (ahead > 0.05) {
+            ahead -= 0.05;
+            if (ahead > 0.3) ahead = 0.3;
+            int64_t remainUs = (int64_t)(ahead * 1000000.0);
+            uint64_t gen = _generation;
+            while (remainUs > 0) {
+                if (_generation != gen || _stopRequested) break;
+                int64_t step = (remainUs > 10000) ? 10000 : remainUs;
+                av_usleep((unsigned)step);
+                remainUs -= step;
+                _audioPaceWaits += 1;
+                _audioPaceUs += (uint64_t)step;
+            }
+        }
     }
+    _audioPaceLastUs = av_gettime_relative();
 }
 
 - (void)appendAudioFrame:(AVFrame *)af {
@@ -1623,8 +1607,9 @@ static NSTimeInterval gLastDecodeTick = 0;
         // 我们这条上限每帧都会 memmove 丢掉最旧音频，听感就是"一会有一会没"。
         // 环容量 384000 帧（8 秒），消费端跟不上时由读者推进逻辑兜底。
     }
+    size_t pacedFrames = need;   // 本次写入帧数（用于原版节奏计算）
     [_lock unlock];
-    // 【B88 回退】节流条件用错了（存量>200ms 就睡 300ms），且睡在解码线程上会拖死视频。
+    [self paceAudioProducerFrames:pacedFrames];   // 原版：按绝对时钟超前量节流
 }
 // 原版全程 float32：环里就是 float，直接拷出去，不经过 S16 往返
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames {
