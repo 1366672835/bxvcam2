@@ -13,6 +13,7 @@
 //
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import "BXLog.h"
 #include <signal.h>
 #include <execinfo.h>
