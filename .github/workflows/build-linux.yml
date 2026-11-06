@@ -58,7 +58,7 @@ jobs:
           path: |
             vendor/ff-build-arm64/out
             vendor/ff-build-arm64e/out
-          key: ffmpeg-linux-perarch-v2
+          key: ffmpeg-linux-perarch-v3
 
       - name: Build FFmpeg (arm64 + arm64e, minimal, static)
         if: steps.cache-ff.outputs.cache-hit != 'true'
@@ -77,6 +77,7 @@ jobs:
               --arch=arm64 --target-os=darwin --enable-cross-compile \
               --cc=clang-18 --cxx=clang++-18 \
               --disable-programs --disable-doc --disable-debug --disable-autodetect \
+              --disable-asm --disable-inline-asm \
               --disable-iconv --disable-zlib --disable-bzlib --disable-lzma \
               --disable-avdevice --disable-avfilter --disable-postproc \
               --disable-shared --enable-static --enable-network --enable-pic \
