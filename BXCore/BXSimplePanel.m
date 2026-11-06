@@ -1,10 +1,9 @@
 //
-//  BXSimplePanel.m — 精简面板（替换原来的 BXFloatMenuController）
+//  BXSimplePanel.m — 精简面板 v2（好用的版本）
 //
-//  设计目标：
-//    · 只保留 RTSP 虚拟摄像头必需的东西：地址输入、连接/断开/重连、状态显示
-//    · 不读本地视频、不带诊断调试开关、不做复杂页面切换
-//    · 每秒刷新一次状态（主线程，轻量）
+//  v1 的问题：面板太小、键盘挡住按钮、没有关闭按钮、不能拖动、状态字太小。
+//  v2：340×460 卡片、标题栏可拖动、右上角关闭、地址框带粘贴/清空、
+//      44pt 大按钮、状态大字+颜色点、点空白收键盘。
 //
 
 #import <UIKit/UIKit.h>
@@ -15,20 +14,25 @@
 #import "BXFloatStore.h"
 #import "BXLog.h"
 
-#define C_BG()     [UIColor colorWithRed:0.12 green:0.12 blue:0.13 alpha:1.0]
-#define C_CARD()   [UIColor colorWithRed:0.19 green:0.19 blue:0.21 alpha:1.0]
-#define C_TEXT()   [UIColor whiteColor]
-#define C_SUB()    [UIColor colorWithRed:0.62 green:0.62 blue:0.65 alpha:1.0]
-#define C_BLUE()   [UIColor colorWithRed:0.20 green:0.55 blue:1.00 alpha:1.0]
-#define C_GREEN()  [UIColor colorWithRed:0.20 green:0.78 blue:0.45 alpha:1.0]
-#define C_RED()    [UIColor colorWithRed:0.92 green:0.30 blue:0.28 alpha:1.0]
-
 extern NSString *BXStallSampleText(void);
+
+#define C_BG()     [UIColor colorWithRed:0.09 green:0.09 blue:0.11 alpha:1.0]
+#define C_CARD()   [UIColor colorWithRed:0.17 green:0.17 blue:0.19 alpha:1.0]
+#define C_TEXT()   [UIColor whiteColor]
+#define C_SUB()    [UIColor colorWithRed:0.60 green:0.60 blue:0.64 alpha:1.0]
+#define C_BLUE()   [UIColor colorWithRed:0.16 green:0.52 blue:1.00 alpha:1.0]
+#define C_GREEN()  [UIColor colorWithRed:0.16 green:0.76 blue:0.44 alpha:1.0]
+#define C_RED()    [UIColor colorWithRed:0.92 green:0.28 blue:0.26 alpha:1.0]
+#define C_GRAY()   [UIColor colorWithRed:0.26 green:0.26 blue:0.29 alpha:1.0]
+
+static const CGFloat kPanelW = 340.0;
+static const CGFloat kPanelH = 460.0;
 
 @interface BXFloatMenuController ()
 @property (nonatomic, strong) UITextField *urlField;
 @property (nonatomic, strong) UILabel     *stateLabel;
 @property (nonatomic, strong) UILabel     *detailLabel;
+@property (nonatomic, strong) UIView      *dot;
 @property (nonatomic, strong) NSTimer     *tick;
 @end
 
@@ -37,85 +41,104 @@ extern NSString *BXStallSampleText(void);
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = C_BG();
-    self.view.layer.cornerRadius = 14;
+    self.view.layer.cornerRadius = 16;
+    self.view.layer.borderWidth = 1.0;
+    self.view.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
     self.view.clipsToBounds = YES;
     [self buildUI];
     [self refresh];
     __weak typeof(self) ws = self;
     _tick = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
         __strong typeof(ws) s = ws;
-        if (s) [s refresh];
+        if (s && s.view.window) [s refresh];
     }];
 }
 
 - (void)dealloc { [_tick invalidate]; _tick = nil; }
 
-#pragma mark - 构建
+#pragma mark - 布局
 
 - (void)buildUI {
-    CGFloat w = 320, pad = 14;
+    CGFloat pad = 16;
 
-    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(pad, 12, 200, 20)];
+    // 标题栏（可拖动）
+    UIView *bar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kPanelW, 48)];
+    bar.backgroundColor = C_CARD();
+    [self.view addSubview:bar];
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onDrag:)];
+    [bar addGestureRecognizer:pan];
+
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(pad, 14, 220, 20)];
     title.text = @"百相 VCam";
-    title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    title.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     title.textColor = C_TEXT();
-    [self.view addSubview:title];
+    [bar addSubview:title];
 
-    UILabel *ver = [[UILabel alloc] initWithFrame:CGRectMake(w - 110, 14, 96, 16)];
-    ver.text = @"RTSP 虚拟摄像头";
-    ver.font = [UIFont systemFontOfSize:10];
-    ver.textColor = C_SUB();
-    ver.textAlignment = NSTextAlignmentRight;
-    [self.view addSubview:ver];
+    UIButton *close = [UIButton buttonWithType:UIButtonTypeCustom];
+    close.frame = CGRectMake(kPanelW - 44, 8, 36, 32);
+    close.backgroundColor = C_GRAY();
+    close.layer.cornerRadius = 8;
+    [close setTitle:@"✕" forState:UIControlStateNormal];
+    [close setTitleColor:C_SUB() forState:UIControlStateNormal];
+    close.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [close addTarget:self action:@selector(onClose) forControlEvents:UIControlEventTouchUpInside];
+    [bar addSubview:close];
 
-    // 地址输入
-    _urlField = [[UITextField alloc] initWithFrame:CGRectMake(pad, 44, w - pad * 2, 38)];
+    // 地址框
+    _urlField = [[UITextField alloc] initWithFrame:CGRectMake(pad, 60, kPanelW - pad * 2, 44)];
     _urlField.backgroundColor = C_CARD();
-    _urlField.layer.cornerRadius = 9;
+    _urlField.layer.cornerRadius = 10;
     _urlField.textColor = C_TEXT();
-    _urlField.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
+    _urlField.font = [UIFont fontWithName:@"Menlo" size:12] ?: [UIFont systemFontOfSize:12];
     _urlField.placeholder = @"rtsp://192.168.1.4:8554/live/123";
     _urlField.autocapitalizationType = UITextAutocapitalizationTypeNone;
     _urlField.autocorrectionType = UITextAutocorrectionTypeNo;
     _urlField.keyboardType = UIKeyboardTypeURL;
     _urlField.returnKeyType = UIReturnKeyDone;
+    _urlField.clearButtonMode = UITextFieldViewModeWhileEditing;
     _urlField.text = [[BXFloatStore shared] objectForKey:@"rtsp_url"] ?: @"";
-    _urlField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 10, 1)];
+    _urlField.leftView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 1)];
     _urlField.leftViewMode = UITextFieldViewModeAlways;
     [self.view addSubview:_urlField];
 
-    // 三个按钮
-    CGFloat by = 92, bh = 40, bw = (w - pad * 2 - 16) / 3.0;
-    [self addButton:@"连接"   x:pad                            y:by w:bw h:bh color:C_BLUE()  action:@selector(onConnect)];
-    [self addButton:@"重连"   x:pad + bw + 8                    y:by w:bw h:bh color:C_CARD()  action:@selector(onReconnect)];
-    [self addButton:@"断开"   x:pad + (bw + 8) * 2              y:by w:bw h:bh color:C_RED()   action:@selector(onDisconnect)];
-    [self addButton:@"复制日志" x:pad y:by + bh + 8 w:w - pad * 2 h:30 color:C_CARD() action:@selector(onCopyLog)];
+    CGFloat halfW = (kPanelW - pad * 2 - 10) / 2.0;
+    [self addButton:@"粘贴" x:pad              y:112 w:halfW h:34 color:C_GRAY() action:@selector(onPaste)];
+    [self addButton:@"清空" x:pad + halfW + 10 y:112 w:halfW h:34 color:C_GRAY() action:@selector(onClear)];
 
-    // 状态卡
-    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(pad, 180, w - pad * 2, 108)];
+    CGFloat bw = (kPanelW - pad * 2 - 20) / 3.0;
+    [self addButton:@"连接" x:pad                 y:158 w:bw h:46 color:C_BLUE() action:@selector(onConnect)];
+    [self addButton:@"重连" x:pad + bw + 10       y:158 w:bw h:46 color:C_GRAY() action:@selector(onReconnect)];
+    [self addButton:@"断开" x:pad + (bw + 10) * 2 y:158 w:bw h:46 color:C_RED()  action:@selector(onDisconnect)];
+
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(pad, 220, kPanelW - pad * 2, 130)];
     card.backgroundColor = C_CARD();
-    card.layer.cornerRadius = 10;
+    card.layer.cornerRadius = 12;
     [self.view addSubview:card];
 
-    _stateLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 10, card.bounds.size.width - 24, 18)];
-    _stateLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    _dot = [[UIView alloc] initWithFrame:CGRectMake(14, 16, 10, 10)];
+    _dot.layer.cornerRadius = 5;
+    _dot.backgroundColor = C_RED();
+    [card addSubview:_dot];
+
+    _stateLabel = [[UILabel alloc] initWithFrame:CGRectMake(30, 11, card.bounds.size.width - 44, 20)];
+    _stateLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     _stateLabel.textColor = C_TEXT();
     _stateLabel.text = @"未连接";
     [card addSubview:_stateLabel];
 
-    _detailLabel = [[UILabel alloc] initWithFrame:CGRectMake(12, 32, card.bounds.size.width - 24, 68)];
-    _detailLabel.numberOfLines = 4;
-    _detailLabel.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
+    _detailLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 38, card.bounds.size.width - 28, 84)];
+    _detailLabel.numberOfLines = 5;
+    _detailLabel.font = [UIFont fontWithName:@"Menlo" size:11] ?: [UIFont systemFontOfSize:11];
     _detailLabel.textColor = C_SUB();
     [card addSubview:_detailLabel];
 
-    // 说明
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(pad, 296, w - pad * 2, 32)];
-    hint.numberOfLines = 2;
-    hint.font = [UIFont systemFontOfSize:10];
-    hint.textColor = C_SUB();
-    hint.text = @"改地址后点「连接」。进相机页会自动连接一次。\n推流地址需与电脑端一致（默认 /live/123）。";
-    [self.view addSubview:hint];
+    CGFloat btmW = (kPanelW - pad * 2 - 10) / 2.0;
+    [self addButton:@"复制日志" x:pad                   y:364 w:btmW h:38 color:C_GRAY() action:@selector(onCopyLog)];
+    [self addButton:@"关闭面板" x:pad + btmW + 10        y:364 w:btmW h:38 color:C_GRAY() action:@selector(onClose)];
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKbd)];
+    tap.cancelsTouchesInView = NO;
+    [self.view addGestureRecognizer:tap];
 }
 
 - (void)addButton:(NSString *)title x:(CGFloat)x y:(CGFloat)y w:(CGFloat)w h:(CGFloat)h
@@ -123,15 +146,37 @@ extern NSString *BXStallSampleText(void);
     UIButton *b = [UIButton buttonWithType:UIButtonTypeCustom];
     b.frame = CGRectMake(x, y, w, h);
     b.backgroundColor = color;
-    b.layer.cornerRadius = 9;
-    b.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    b.layer.cornerRadius = 10;
+    b.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
     [b setTitle:title forState:UIControlStateNormal];
     [b setTitleColor:C_TEXT() forState:UIControlStateNormal];
     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:b];
 }
 
-#pragma mark - 动作
+#pragma mark - 交互
+
+- (void)onDrag:(UIPanGestureRecognizer *)g {
+    UIView *v = self.view;
+    CGPoint t = [g translationInView:v.superview];
+    v.center = CGPointMake(v.center.x + t.x, v.center.y + t.y);
+    [g setTranslation:CGPointZero inView:v.superview];
+}
+
+- (void)dismissKbd { [self.view endEditing:YES]; }
+
+- (void)onClose {
+    [self.view endEditing:YES];
+    self.view.hidden = YES;
+    if (self.onRequestClose) self.onRequestClose();
+}
+
+- (void)onPaste {
+    NSString *s = [UIPasteboard generalPasteboard].string;
+    if (s.length) _urlField.text = s;
+}
+
+- (void)onClear { _urlField.text = @""; }
 
 - (NSString *)currentURL {
     NSString *u = [_urlField.text stringByTrimmingCharactersInSet:
@@ -147,9 +192,11 @@ extern NSString *BXStallSampleText(void);
     [[BXFloatStore shared] setObject:u forKey:@"rtsp_url"];
     [[BXFloatStore shared] setObject:@(1) forKey:@"rtsp.enabled"];
     [BXCaptureBridge shared].enabled = YES;
+    [BXCaptureBridge shared].audioReplace = YES;
 }
 
 - (void)onConnect {
+    [self.view endEditing:YES];
     NSString *u = [self currentURL];
     if (!u.length) { [self toast:@"先填地址"]; return; }
     [self saveURL:u];
@@ -159,13 +206,14 @@ extern NSString *BXStallSampleText(void);
         NSError *e = nil;
         BOOL ok = [br useRTSPURLString:u error:&e];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self toast:ok ? @"已连接" : [NSString stringWithFormat:@"失败：%@", e.localizedDescription ?: @"未知"]];
-            [self refresh];
+            [self toast:ok ? @"已连接" : [NSString stringWithFormat:@"失败：%@",
+                                         e.localizedDescription ?: @"未知"]];
         });
     });
 }
 
 - (void)onReconnect {
+    [self.view endEditing:YES];
     NSString *u = [self currentURL];
     if (!u.length) { [self toast:@"先填地址"]; return; }
     [self saveURL:u];
@@ -176,8 +224,7 @@ extern NSString *BXStallSampleText(void);
         NSError *e = nil;
         BOOL ok = [br useRTSPURLString:u error:&e];
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self toast:ok ? @"已重连" : [NSString stringWithFormat:@"失败：%@", e.localizedDescription ?: @"未知"]];
-            [self refresh];
+            [self toast:ok ? @"已重连" : @"重连失败"];
         });
     });
 }
@@ -185,19 +232,16 @@ extern NSString *BXStallSampleText(void);
 - (void)onDisconnect {
     [[BXCaptureBridge shared] stopNetworkSources];
     [self toast:@"已断开"];
-    [self refresh];
 }
 
 - (void)onCopyLog {
     NSString *all = [NSString stringWithFormat:@"=== 日志 ===\n%@\n\n=== 主线程采样 ===\n%@",
-                               BXLogText(), BXStallSampleText()];
+                     BXLogText(), BXStallSampleText()];
     [UIPasteboard generalPasteboard].string = all;
     [self toast:@"日志已复制，粘贴给我即可"];
 }
 
-- (void)toast:(NSString *)msg {
-    _stateLabel.text = msg;
-}
+- (void)toast:(NSString *)msg { _stateLabel.text = msg; }
 
 #pragma mark - 状态
 
@@ -205,14 +249,11 @@ extern NSString *BXStallSampleText(void);
     BXCaptureBridge *b = [BXCaptureBridge shared];
     BOOL running = b.isStreaming;
     _stateLabel.text = running ? @"已连接" : @"未连接";
-    _stateLabel.textColor = running ? C_GREEN() : C_RED();
+    _dot.backgroundColor = running ? C_GREEN() : C_RED();
 
-    NSUInteger readFPS = [b readFPS];
-    NSUInteger fillFPS = [b slotFillFPS];
-    NSUInteger replFPS = b.replaceFPS;
     _detailLabel.text = [NSString stringWithFormat:
-        @"读取 %lu fps   入槽 %lu fps   替换 %lu fps\n已替换 %lu   直通 %lu\n音频欠载 %lu 次 / 缺 %lu 帧\n地址 %@",
-        (unsigned long)readFPS, (unsigned long)fillFPS, (unsigned long)replFPS,
+        @"读取 %lu   入槽 %lu   替换 %lu fps\n已替换 %lu   直通 %lu\n音频欠载 %lu 次 / 缺 %lu 帧\n流地址 %@",
+        (unsigned long)[b readFPS], (unsigned long)[b slotFillFPS], (unsigned long)b.replaceFPS,
         (unsigned long)b.replacedFrames, (unsigned long)b.passthroughFrames,
         (unsigned long)[b audioUnderruns], (unsigned long)[b audioUnderrunFrames],
         running ? @"在线" : @"—"];
