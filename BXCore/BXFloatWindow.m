@@ -132,7 +132,7 @@ static NSString *const kBubbleSize     = @"bx.ui.bubble.size";
     CGFloat size = _bubble.bounds.size.width;
     CGFloat margin = 10;
 
-    CGPoint t = [pan translationInView:self.rootViewController.view];
+    CGPoint t = [pan translationInView:(_bubble.superview ?: self.rootViewController.view)];
 
     switch (pan.state) {
         case UIGestureRecognizerStateBegan:
@@ -185,7 +185,7 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
         _menu = [BXFloatMenuController new];
         _menu.view.alpha = 0;
         _menu.view.transform = CGAffineTransformMakeScale(0.88, 0.88);
-        [self.rootViewController.view addSubview:_menu.view];
+        [(_overlay ?: _bubble.superview ?: self.rootViewController.view) addSubview:_menu.view];
     }
     BOOL showing = _menu.view.superview != nil && _menu.view.alpha > 0.05;
     if (showing) {
@@ -197,8 +197,8 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
 
 - (void)_expandMenu {
     CGSize scr = [UIScreen mainScreen].bounds.size;
-    CGFloat w = MIN(300.0, scr.width - 40);
-    CGFloat h = MIN(430.0, scr.height * 0.62);
+    CGFloat w = MIN(320.0, scr.width - 24);   // 新面板就是 320 宽
+    CGFloat h = MIN(300.0, scr.height * 0.5);
 
     BOOL leftSide = CGRectGetMidX(_bubble.frame) < scr.width / 2.0;
     CGFloat x = leftSide ? (CGRectGetMaxX(_bubble.frame) + 12)
@@ -207,8 +207,10 @@ shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other 
     CGFloat y = MAX(60, MIN(CGRectGetMidY(_bubble.frame) - h / 2.0, scr.height - h - 60));
 
     // 收起时会把 menu.view 从父视图摘掉，再次展开必须重新挂回去
-    if (!_menu.view.superview) {
-        [self.rootViewController.view addSubview:_menu.view];
+    UIView *host = _overlay ?: _bubble.superview ?: self.rootViewController.view;
+    if (!_menu.view.superview || _menu.view.superview != host) {
+        [_menu.view removeFromSuperview];
+        [host addSubview:_menu.view];
     }
     _menu.view.hidden = NO;
 
