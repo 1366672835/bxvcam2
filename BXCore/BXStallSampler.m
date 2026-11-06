@@ -1,15 +1,19 @@
 //
-//  BXStallSampler.m — 主线程卡死采样器
+//  BXStallSampler.m — 主线程卡死采样器（v2：带镜像名 + 偏移）
 //
-//  原理（poor man's profiler）：
-//    后台线程每 2 秒向"主线程"发 SIGPROF；
-//    信号处理函数在主线程上下文里执行，此时 backtrace() 拿到的就是主线程当前调用栈；
-//    把栈顶若干帧写到 /tmp/bxstall.txt（每次覆盖），于是文件里永远是"最近一次采样"。
+//  后台线程每 2 秒向主线程发 SIGPROF；信号处理函数在主线程上下文执行，
+//  backtrace() 得到主线程当前栈，再用 dladdr() 标出每帧属于哪张镜像、偏移多少。
 //
-//  冻结后再重启，读这个文件就知道主线程卡在哪个函数里 —— 不需要越狱、不需要 Xcode。
+//  输出 /tmp/bxstall.txt，例如：
+//    #00 BXFloatVCam +0x1a3c4
+//    #05 Douyin +0x8c1b4
+//    #11 UIKitCore +0x2f6b4
+//
+//  这样"卡在谁身上"一目了然。
 //
 
 #import <Foundation/Foundation.h>
+#import "BXLog.h"
 #include <signal.h>
 #include <execinfo.h>
 #include <pthread.h>
@@ -17,31 +21,53 @@
 #include <fcntl.h>
 #include <string.h>
 #include <stdio.h>
+#include <dlfcn.h>
 
 static pthread_t gMainThread;
 static int gStallFD = -1;
+static int gSampleSeq = 0;
+
+static const char *BXBaseName(const char *path) {
+    if (!path) return "?";
+    const char *p = strrchr(path, '/');
+    return p ? p + 1 : path;
+}
 
 static void BXSigProfHandler(int sig, siginfo_t *info, void *ctx) {
     (void)sig; (void)info; (void)ctx;
     if (gStallFD < 0) return;
 
-    void *frames[64];
-    int n = backtrace(frames, 64);
+    void *frames[48];
+    int n = backtrace(frames, 48);
     if (n <= 0) return;
 
-    // 覆盖写：只保留最近一次采样的栈
+    gSampleSeq++;
     lseek(gStallFD, 0, SEEK_SET);
-    char hdr[64];
-    int hn = snprintf(hdr, sizeof(hdr), "=== sample (frames=%d) ===\n", n);
+    char hdr[96];
+    int hn = snprintf(hdr, sizeof(hdr), "=== main-thread sample #%d (frames=%d) ===\n",
+                      gSampleSeq, n);
     write(gStallFD, hdr, (size_t)hn);
 
     for (int i = 0; i < n; i++) {
-        char line[256];
-        // 只写地址：符号化交给 backtrace_symbols 不稳定（非 async-signal-safe）
-        int ln = snprintf(line, sizeof(line), "  #%02d %p\n", i, frames[i]);
-        write(gStallFD, line, (size_t)ln);
+        Dl_info di;
+        memset(&di, 0, sizeof(di));
+        char line[320];
+        int ln;
+        if (dladdr(frames[i], &di) && di.dli_fname) {
+            long off = (long)((char *)frames[i] - (char *)di.dli_fbase);
+            if (di.dli_sname) {
+                ln = snprintf(line, sizeof(line), "  #%02d %-16s +0x%lx  %s\n",
+                              i, BXBaseName(di.dli_fname), off, di.dli_sname);
+            } else {
+                ln = snprintf(line, sizeof(line), "  #%02d %-16s +0x%lx\n",
+                              i, BXBaseName(di.dli_fname), off);
+            }
+        } else {
+            ln = snprintf(line, sizeof(line), "  #%02d %p (no image)\n", i, frames[i]);
+        }
+        if (ln > 0) write(gStallFD, line, (size_t)ln);
     }
-    ftruncate(gStallFD, (off_t)(hn + n * 20 + 32));
+    ftruncate(gStallFD, (off_t)lseek(gStallFD, 0, SEEK_CUR));
 }
 
 static void *BXSamplerThread(void *arg) {
@@ -69,13 +95,18 @@ void BXStartMainThreadSampler(void) {
     sigemptyset(&sa.sa_mask);
     sigaction(SIGPROF, &sa, NULL);
 
-    gMainThread = pthread_self();   // 本函数在主线程调用
+    gMainThread = pthread_self();
     pthread_t th;
     pthread_create(&th, NULL, BXSamplerThread, NULL);
     pthread_detach(th);
+
+    // 顺带记下镜像基址，便于离线核对
+    Dl_info di;
+    if (dladdr((void *)&BXStartMainThreadSampler, &di)) {
+        BXLog(@"[sampler] dylib=%s base=%p", BXBaseName(di.dli_fname), di.dli_fbase);
+    }
 }
 
-/// 读取最近一次采样（给面板"复制日志"用）
 NSString *BXStallSampleText(void) {
     NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"bxstall.txt"];
     NSString *s = [NSString stringWithContentsOfFile:path
