@@ -3,7 +3,9 @@
 //
 
 #import "BXFloatModule.h"
+#import "BXLog.h"
 #import "BXFloatStore.h"
+#import "BXLog.h"
 
 @implementation BXFloatModule
 
@@ -117,7 +119,7 @@
 - (void)registerModule:(BXFloatModule *)module {
     if (!module.key.length) return;
     if (_index[module.key]) {
-        NSLog(@"[BXFloat] 重复注册模块 %@，已忽略", module.key);
+        BXLogWrite(@"[BXFloat] 重复注册模块 %@，已忽略", module.key);
         return;
     }
     [_modules addObject:module];
