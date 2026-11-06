@@ -16,7 +16,7 @@
 #import "BXLog.h"
 
 extern "C" void BXRegisterBuiltinModules(void);
-extern void BXStartMainThreadSampler(void);
+extern "C" void BXStartMainThreadSampler(void);
 
 static void BXAttachIfNeeded(void);
 static void BXOnAppDidBecomeActive(id self, SEL _cmd, id app);
