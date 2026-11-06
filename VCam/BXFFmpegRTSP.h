@@ -72,6 +72,7 @@
 /// 音频欠载：环形缓冲不够填满这一帧的次数 / 累计缺口帧数
 /// 采集恢复后清掉时间映射（避免延迟指标算出天文数字）
 - (void)resetTimeline;
+- (void)resetForSessionStop;   // 照原版 0x330cb0：清缓冲索引与可写状态
 - (NSUInteger)audioUnderruns;
 - (NSUInteger)audioUnderrunFrames;
 - (NSUInteger)readStalls;
