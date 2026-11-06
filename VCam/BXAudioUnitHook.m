@@ -121,19 +121,18 @@ static OSStatus BXInitHook(AudioUnit unit) {
 
 static OSStatus BXSetPropHook(AudioUnit unit, AudioUnitPropertyID pid, AudioUnitScope scope,
                               AudioUnitElement elem, const void *data, UInt32 size) {
+    // 【照原版】这里只记日志，不采纳格式：
+    //   SetProperty 多半是 Input scope（App 提供给单元的数据格式），
+    //   拿它去填 Render 的输出缓冲会写出错格式的采样 → 杂音。
     if (pid == kAudioUnitProperty_StreamFormat && data &&
         size >= (UInt32)sizeof(AudioStreamBasicDescription)) {
-        AudioStreamBasicDescription asbd = *(const AudioStreamBasicDescription *)data;
-        if (asbd.mSampleRate > 0 && asbd.mChannelsPerFrame > 0) {
-            gCapturedASBD = asbd;
-            gCapturedUnit = unit;
-            gCapturedValid = 1;
-            static int logged = 0;
-            if (logged++ < 4) {
-                BXLogWrite(@"[BXFloat][au] 抓到格式 %.0fHz %uch flags=%#x bytesPerFrame=%u",
-                      asbd.mSampleRate, (unsigned)asbd.mChannelsPerFrame,
-                      (unsigned)asbd.mFormatFlags, (unsigned)asbd.mBytesPerFrame);
-            }
+        AudioStreamBasicDescription a = *(const AudioStreamBasicDescription *)data;
+        static int logged = 0;
+        if (logged++ < 4) {
+            BXLogWrite(@"[BXFloat][au] SetProperty scope=%u bus=%u %.0fHz %uch flags=%#x bpf=%u（仅记录，不采纳）",
+                       (unsigned)scope, (unsigned)elem, a.mSampleRate,
+                       (unsigned)a.mChannelsPerFrame, (unsigned)a.mFormatFlags,
+                       (unsigned)a.mBytesPerFrame);
         }
     }
     return gOrigSetProp ? gOrigSetProp(unit, pid, scope, elem, data, size) : noErr;
@@ -158,7 +157,7 @@ static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioB
     static AudioUnit sASBDUnit = NULL;
 
 
-    // 优先用 SetProperty 抓到格式（原版就是这么做的），避免在回调里查属性
+    // 【照原版】只采纳 Initialize 钩子用 Output scope 抓到的格式（那才是 Render 的输出格式）
     if (gCapturedValid && gCapturedUnit == unit && sASBDUnit != unit) {
         sASBD = gCapturedASBD;
         sASBDUnit = unit;
