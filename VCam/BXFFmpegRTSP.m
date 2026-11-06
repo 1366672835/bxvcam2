@@ -1272,6 +1272,16 @@ static NSTimeInterval gLastDecodeTick = 0;
 
 - (BOOL)renderLatestInto:(CVPixelBufferRef)dst {
     if (!dst) return NO;
+    // 【回前台保护】切后台再回来时，抖音会重建采集会话，而槽位里还是旧帧。
+    // 拿旧帧往新缓冲里写很容易把重建过程拖死，所以"解出来的帧太旧"时先直通。
+    // lastDecodeTick 是解码线程每解出一帧就打的时间戳。
+    {
+        NSTimeInterval tick = [self lastDecodeTick];
+        if (tick > 0 && (CACurrentMediaTime() - tick) > 1.5) {
+            return NO;   // 帧过期：让真实摄像头顶上，等新帧到了再接管
+        }
+    }
+
 
     // 原版 0x32ff78：锁A 取槽位帧 + retain → 解锁A → 锁B + VT 搬运 → 解锁B。
     // 单槽没有"队列空了要复用上一帧"的问题：槽里的帧一直在，直到被新帧覆盖。
