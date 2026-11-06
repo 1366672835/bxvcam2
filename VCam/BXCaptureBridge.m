@@ -525,7 +525,7 @@ static BOOL gAutoStartDone = NO;
 - (BOOL)useRTSPURLString:(NSString *)urlString error:(NSError **)error {
     // 【B81】不安装 AudioUnitRender 钩子：原版从不碰这个函数（只导入 AudioUnitGetProperty/AudioComponent*），
     // 我们用 fishhook 改了它，每 ~10ms 被调一次且一直 audio=0（占了路径没产出）。
-    // BXAudioUnitHookInstall();
+    BXAudioUnitHookInstall();   // B83：照原版重绑 Render + SetProperty，抓真实格式后再填数据
     // 原版 0x330aa0 捕获的布尔就是 loop（见 0x33166c 的日志 "stream opened ... loop=%d"）
     id lp = [[BXFloatStore shared] objectForKey:@"rtsp.loop"];
     self.rtsp.loopPlayback = [lp isKindOfClass:[NSNumber class]] ? [lp boolValue] : YES;
