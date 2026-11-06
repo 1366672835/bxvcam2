@@ -42,10 +42,11 @@ static void BXSigProfHandler(int sig, siginfo_t *info, void *ctx) {
     if (n <= 0) return;
 
     gSampleSeq++;
-    lseek(gStallFD, 0, SEEK_SET);
-    char hdr[96];
-    int hn = snprintf(hdr, sizeof(hdr), "=== main-thread sample #%d (frames=%d) ===\n",
-                      gSampleSeq, n);
+    lseek(gStallFD, 0, SEEK_END);   // 追加，保留历史
+    char hdr[160];
+    int hn = snprintf(hdr, sizeof(hdr), "=== sample #%d t=%.1f app=%d frames=%d ===\n",
+                      gSampleSeq, (double)CACurrentMediaTime(),
+                      (int)[UIApplication sharedApplication].applicationState, n);
     write(gStallFD, hdr, (size_t)hn);
 
     for (int i = 0; i < n; i++) {
@@ -67,7 +68,7 @@ static void BXSigProfHandler(int sig, siginfo_t *info, void *ctx) {
         }
         if (ln > 0) write(gStallFD, line, (size_t)ln);
     }
-    ftruncate(gStallFD, (off_t)lseek(gStallFD, 0, SEEK_CUR));
+
 }
 
 static void *BXSamplerThread(void *arg) {
