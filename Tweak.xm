@@ -65,6 +65,9 @@ static void BXFloatVCamInit(void) {
         // 极简版没有面板，开关无法手动打开：这里强制启用替换，并打开自动开流。
         // 强制启用替换 + 打开自动开流
         [BXCaptureBridge shared].enabled = YES;
+        // 【照原版】音频走采集 delegate：造新的音频 sample buffer 顶替原帧，
+        // 不碰 AudioUnitRender（原版也没碰）。
+        [BXCaptureBridge shared].audioReplace = YES;
         [[BXFloatStore shared] setObject:@(1) forKey:@"rtsp.enabled"];
 
         // 恢复悬浮球/面板挂载（极简版把这段也删了，导致看不到 UI）。
