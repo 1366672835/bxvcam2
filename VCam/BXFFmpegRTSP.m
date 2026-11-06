@@ -158,6 +158,7 @@ static NSString *BXFFErr(int code) {
 - (BOOL)rebuildSwr;
 - (void)appendAudioFrame:(AVFrame *)af;
 - (void)paceAudioProducerFrames:(size_t)frames;   // 原版 0x331ad0 音频节奏
+@end
 
 // 用来判断 stop 是否正跑在解码队列上（是的话不能 dispatch_sync，否则死锁）
 static void *kBXDecodeQueueKey = &kBXDecodeQueueKey;
