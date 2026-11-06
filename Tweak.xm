@@ -71,7 +71,7 @@ static void BXFloatVCamInit(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             [[BXFloatWindow shared] attach];
-
+        });
         BXStartMainThreadSampler();   // 主线程卡死采样（写到 /tmp/bxstall.txt）
 
         // 【心跳】每 2 秒记录一次各子系统状态，用于冻结后定位"谁先停"。
