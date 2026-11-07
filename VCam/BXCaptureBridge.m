@@ -729,6 +729,27 @@ static BOOL gAutoStartDone = NO;
     return [r copyAudioFloat:dst maxFrames:maxFrames];
 }
 
+// 环形缓冲里数据真实的采样率/声道：AudioUnit 钩子必须按这个换算
+- (double)audioSourceRate {
+    BXFFmpegRTSP *r = self.rtsp;
+    if (r && r.isRunning) {
+        double rate = [r audioSampleRate];
+        return rate > 0 ? rate : 48000.0;
+    }
+    double rate = self.localAudio.sampleRate;
+    return rate > 0 ? rate : 48000.0;
+}
+
+- (int)audioSourceChannels {
+    BXFFmpegRTSP *r = self.rtsp;
+    if (r && r.isRunning) {
+        int c = [r audioChannels];
+        return c > 0 ? c : 2;
+    }
+    int c = self.localAudio.channels;
+    return c > 0 ? c : 2;
+}
+
 - (CVPixelBufferRef)copyPreviewFrameBGRA CF_RETURNS_RETAINED {
     return [self.rtsp copyPreviewFrameBGRA];
 }
