@@ -45,11 +45,12 @@ static size_t   sSrcCap = 0;      // 容量（帧）
 static size_t   sSrcLen = 0;      // 已有帧数
 static double   sPos = 0.0;       // 读取位置（帧，带小数）
 static double   sSrcRate = 48000.0;
+static int      sSrcCh = 2;       // 环形缓冲真实声道数（写死 2 会把 mono 源读成噪声）
 
 static void BXAUEnsureSrc(size_t frames) {
     if (sSrcCap >= frames) return;
     size_t cap = frames < 2048 ? 2048 : frames * 2;
-    float *nb = realloc(sSrc, cap * 2 * sizeof(float));
+    float *nb = realloc(sSrc, cap * (size_t)sSrcCh * sizeof(float));
     if (!nb) return;
     sSrc = nb;
     sSrcCap = cap;
@@ -57,7 +58,7 @@ static void BXAUEnsureSrc(size_t frames) {
 
 static void BXAUConsume(size_t n) {
     if (n >= sSrcLen) { sSrcLen = 0; return; }
-    memmove(sSrc, sSrc + n * 2, (sSrcLen - n) * 2 * sizeof(float));
+    memmove(sSrc, sSrc + n * (size_t)sSrcCh, (sSrcLen - n) * (size_t)sSrcCh * sizeof(float));
     sSrcLen -= n;
 }
 
@@ -74,7 +75,7 @@ static void BXAUReadMore(size_t wantFrames) {
     if (sSrcLen >= sSrcCap) return;          // 防止无符号下溢
     size_t room = sSrcCap - sSrcLen;
     if (room == 0) return;
-    NSUInteger got = [[BXCaptureBridge shared] pullAudioFloat:(sSrc + sSrcLen * 2)
+    NSUInteger got = [[BXCaptureBridge shared] pullAudioFloat:(sSrc + sSrcLen * (size_t)sSrcCh)
                                                     maxFrames:room];
     sSrcLen += got;
 }
@@ -196,9 +197,23 @@ static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioB
     int nonInterleaved = (sASBD.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
     double dstRate = sASBD.mSampleRate > 0 ? sASBD.mSampleRate : 44100.0;
 
+    // 源格式必须跟随环形缓冲（写死 48k/2ch 会让 mono/44.1k 源变成噪声 + 变调）
+    BXCaptureBridge *br = [BXCaptureBridge shared];
+    double srcRate = [br audioSourceRate];
+    if (srcRate > 0) sSrcRate = srcRate;
+    int srcCh = [br audioSourceChannels];
+    if (srcCh >= 1 && srcCh <= 8) sSrcCh = srcCh;
+
+    static int sLogN = 0;
+    if (sLogN < 3) {
+        sLogN++;
+        NSLog(@"[BXFloat][au] render unit=%p bus=%u frames=%u dst=%.0fHz/%dch/%s src=%.0fHz/%dch",
+              unit, (unsigned)bus, (unsigned)frames, dstRate, dstCh,
+              nonInterleaved ? "planar" : "inter", sSrcRate, sSrcCh);
+    }
+
     size_t need = BXAUEnsureNeeded(frames, dstRate);
     if (sSrcLen < need) BXAUReadMore(need * 2);
-    if (sSrcLen == 0) return;                    // 没数据：麦克风原样
 
     double ratio = sSrcRate / dstRate;
 
@@ -211,29 +226,25 @@ static void BXFillAudioBuffers(AudioUnit unit, UInt32 bus, UInt32 frames, AudioB
         sMix = nb;
         sMixCap = frames;
     }
+    memset(sMix, 0, (size_t)frames * 2 * sizeof(float));   // 欠载=静音，不再"保持上一帧"
 
     double pos = sPos;
     UInt32 produced = 0;
-    float lastL = 0.0f, lastR = 0.0f;
     for (UInt32 f = 0; f < frames; f++) {
         size_t i0 = (size_t)pos;
         size_t i1 = i0 + 1;
         if (i1 >= sSrcLen) break;
         double frac = pos - (double)i0;
-        float l = sSrc[i0 * 2] * (1.0f - (float)frac) + sSrc[i1 * 2] * (float)frac;
-        float r = sSrc[i0 * 2 + 1] * (1.0f - (float)frac) + sSrc[i1 * 2 + 1] * (float)frac;
+        const float *p0 = sSrc + i0 * (size_t)sSrcCh;
+        const float *p1 = sSrc + i1 * (size_t)sSrcCh;
+        float l = p0[0] * (1.0f - (float)frac) + p1[0] * (float)frac;
+        float r = (sSrcCh > 1) ? (p0[1] * (1.0f - (float)frac) + p1[1] * (float)frac) : l;
         sMix[f * 2] = l;
         sMix[f * 2 + 1] = r;
-        lastL = l; lastR = r;
         produced = f + 1;
         pos += ratio;
     }
-    if (produced == 0) return;
-    gAUFills++;
-    for (UInt32 f = produced; f < frames; f++) {
-        sMix[f * 2] = lastL;
-        sMix[f * 2 + 1] = lastR;
-    }
+    if (produced > 0) gAUFills++;
 
     // ② 按格式铺开（不再推进 sPos）
     for (UInt32 b = 0; b < ioData->mNumberBuffers; b++) {
