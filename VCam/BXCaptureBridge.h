@@ -59,6 +59,9 @@
 // 音频用它来和画面同步：画面不动，音频就停（原版行为）。
 - (NSTimeInterval)lastVideoTick;
 - (NSUInteger)pullAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames;
+/// 环形缓冲里 PCM 的真实采样率/声道数（AudioUnit 钩子按它换算，不能写死）
+- (double)audioSourceRate;
+- (int)audioSourceChannels;
 - (CVPixelBufferRef)copyPreviewFrameBGRA CF_RETURNS_RETAINED;
 - (CVPixelBufferRef)copyLatestStreamFrame CF_RETURNS_RETAINED;
 
