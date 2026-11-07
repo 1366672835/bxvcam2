@@ -99,6 +99,8 @@
 - (void)configureAudioSampleRate:(double)rate channels:(int)channels;
 /// 当前重采样输出的声道数
 - (int)audioChannels;
+/// 环形缓冲里 float32 数据的实际采样率（重采样目标率）
+- (double)audioSampleRate;
 
 /// 取最新音频（S16 交错，48kHz，双声道）。返回写入的帧数，0 表示暂时没有。
 - (NSUInteger)copyAudioFloat:(float *)dst maxFrames:(NSUInteger)maxFrames;
