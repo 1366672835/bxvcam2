@@ -263,6 +263,7 @@ static void bx_vt_output(void *refCon, void *frameRefCon, OSStatus status,
 
 - (BOOL)hasAudio { return _aRing != NULL; }
 - (int)audioChannels { return (_aOutCh > 0) ? _aOutCh : 2; }
+- (double)audioSampleRate { return (_aOutRate > 0) ? (double)_aOutRate : 48000.0; }
 - (NSString *)lastReason { return self.lastReasonText ?: @"-"; }
 - (NSUInteger)decodeFPS { return _fpsEnq; }
 - (NSUInteger)readFPS { return _fpsPkt; }
